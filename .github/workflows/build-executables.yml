@@ -56,7 +56,7 @@ jobs:
     permissions:
       contents: write   # attaches the files to the release (release assets do not count against the artifact quota)
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false   # the token (write access) must not stay in .git/config where later steps could read it
       - name: Check that the release tag matches the app version
@@ -150,7 +150,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false   # the token (write access) must not stay in .git/config where later steps could read it
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
