@@ -1,0 +1,35 @@
+# MANIFEST.in - Specifies additional files to include in source distribution
+
+# Documentation files
+include README.md
+include LICENSE
+include QUICK_STYLE_REFERENCE.md
+recursive-include docs *.md
+
+# Configuration files
+include requirements.txt
+include setup.py
+include pytest.ini
+include RPG_Database_Manager.spec
+
+# Data and resource files
+recursive-include data *
+recursive-include config *.yaml *.yml *.json
+
+# Exclude compiled Python files and cache
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *$py.class
+global-exclude .DS_Store
+
+# Exclude build artifacts
+prune build
+prune dist
+prune *.egg-info
+
+# Exclude test files from distribution
+prune tests
+
+# Exclude version control
+exclude .gitignore
+global-exclude .git

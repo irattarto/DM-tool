@@ -1,0 +1,7 @@
+# Keeps the pinned GitHub Actions (commit hashes in the workflows) up to date through reviewable pull requests.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

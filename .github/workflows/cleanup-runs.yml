@@ -1,0 +1,53 @@
+name: Clean up old workflow runs
+
+# Deletes finished workflow runs beyond the newest N per workflow, so the Actions tab stays readable.
+# Runs weekly, whenever this file changes on main, and can be started by hand (Actions > Clean up old workflow runs > Run workflow).
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "How many of the newest finished runs to keep per workflow"
+        type: string
+        default: "5"
+      dry_run:
+        description: "Only list what would be deleted"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 4 * * 0"
+  push:                       # merging or editing this file runs a clean-up straight away
+    branches: ["main"]
+    paths: [".github/workflows/cleanup-runs.yml"]
+
+permissions:
+  actions: write   # needed to delete runs
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Delete old runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          KEEP: ${{ inputs.keep || '5' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          case "$KEEP" in ''|*[!0-9]*) echo "keep must be a number"; exit 1;; esac
+          deleted=0
+          for wf in $(gh api "repos/$REPO/actions/workflows" --paginate --jq '.workflows[].id'); do
+            ids=$(gh api "repos/$REPO/actions/workflows/$wf/runs?status=completed&per_page=100" --paginate \
+                  --jq '.workflow_runs[] | [.created_at, .id] | @tsv' | sort -r | tail -n +"$((KEEP + 1))" | cut -f2)
+            for id in $ids; do
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "would delete run $id (workflow $wf)"
+              else
+                gh api -X DELETE "repos/$REPO/actions/runs/$id" --silent && deleted=$((deleted + 1))
+              fi
+            done
+          done
+          echo "Deleted $deleted run(s). Kept the newest $KEEP per workflow."
