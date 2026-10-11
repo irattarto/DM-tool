@@ -134,7 +134,7 @@ jobs:
           $flags = @(); if ($env:PRE -eq 'true') { $flags += '--prerelease' }
           gh release create $env:TAG --target $env:GITHUB_SHA --title $env:TAG --generate-notes @flags 2>$null; $global:LASTEXITCODE = 0
           gh release upload $env:TAG RPG_Database_Manager-Setup-x64.exe RPG_Database_Manager-windows-x64.zip --clobber
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: needs.plan.outputs.publish != 'true'
         with:
           name: RPG_Database_Manager-windows-x64
@@ -193,7 +193,7 @@ jobs:
           flags=(); [ "$PRE" = true ] && flags+=(--prerelease)
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes "${flags[@]}" || true   # the other platform job may have created it already
           gh release upload "$TAG" RPG_Database_Manager-x86_64.AppImage RPG_Database_Manager-linux-x64.tar.gz --clobber
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: needs.plan.outputs.publish != 'true'
         with:
           name: RPG_Database_Manager-linux-x64
