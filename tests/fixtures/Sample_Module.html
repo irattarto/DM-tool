@@ -1,0 +1,43 @@
+<!doctype html><html lang="hu"><head><meta charset="utf-8"><title>Sample Pass</title></head><body>
+<header><p class="eyebrow">NED · Sample · Kampánymodul</p><h1>Sample Pass</h1><p class="sub">A small fixture covering every id prefix.</p></header>
+<div class="toc"><ol><li><a href="#intro">Bevezető</a></li><li><a href="#cast">Szereplők</a></li><li><a href="#places">Helyszínek</a></li><li><a href="#plot">Cselekmény</a></li></ol></div>
+<section id="intro"><div class="section-header"><h2>Bevezető</h2></div>
+<p>Welcome to <a class="xref" href="#l-inn">the inn</a>.</p></section>
+<section id="cast"><div class="section-header"><h2>Szereplők</h2></div>
+<div class="card" id="f-guild"><h4>Iron Guild</h4><p>They hire <a class="xref" href="#c-boss">Boss</a>.</p></div>
+<div class="card" id="f-order"><h4>Silver Order</h4><p>Old rivals of the guild.</p></div>
+<details class="npc-card" id="c-boss"><summary class="card-summary"><div class="npc-name">Big Boss</div>
+  <div class="npc-epithet">The Head</div><div class="npc-meta"><span class="tag">Iron Guild — leader</span></div></summary>
+  <div class="card-body"><p>Runs things at <a class="xref" href="#l-inn">the inn</a>.</p></div></details>
+<details class="npc-card" id="c-monk"><summary class="card-summary"><div class="npc-name">Brother Tam</div></summary>
+  <div class="card-body"><p>Serves the <a class="xref" href="#f-order">Order</a>.</p></div></details>
+<table><thead><tr><th>Név</th><th>Szerep</th><th>Kép-prompt</th></tr></thead>
+<tr id="g-clerk"><td>Dusty Clerk</td><td>Keeps books</td><td style="font-family:'Courier New'">a clerk</td></tr></table>
+<details class="creature-card" id="m-wolf"><summary class="card-summary"><div class="npc-name">Dire Wolf</div></summary>
+  <div class="card-body"><p>Hunts at night.</p></div></details>
+<details class="creature-card" id="m-bat"><summary class="card-summary"><div class="npc-name">Giant Bat</div></summary>
+  <div class="card-body"><p>Nests in the cellar.</p></div></details>
+</section>
+<section id="places"><div class="section-header"><h2>Helyszínek</h2></div>
+<details class="room" id="l-inn"><summary class="card-summary"><span class="room-tag rt-village">Town</span><h4>The Inn</h4></summary>
+  <div class="card-body"><p>A warm common room.</p></div></details>
+<details class="room" id="l-cellar"><summary class="card-summary"><span class="room-tag rt-dungeon">Dungeon</span><h4>The Cellar</h4></summary>
+  <div class="card-body"><p>Damp and dark.</p></div></details>
+<details class="card" id="item-key"><summary class="card-summary"><h4>Rusty Key</h4></summary>
+  <div class="card-body"><p>Opens the cellar.</p></div></details>
+<details class="card" id="gift-ring"><summary class="card-summary"><h4>Ring of Thanks</h4></summary>
+  <div class="card-body"><p>A reward.</p></div></details>
+<details class="card" id="pw-light"><summary class="card-summary"><h4>Light</h4></summary>
+  <div class="card-body"><p>A simple spell.</p></div></details>
+<details class="room" id="h-note"><summary class="card-summary"><h4>Torn Note</h4></summary>
+  <div class="card-body"><p>"Meet me below."</p></div></details>
+<div class="hook-box" id="hook-anna"><h4>Anna</h4><p>Owes the guild a favour.</p></div>
+</section>
+<section id="plot"><div class="section-header"><h2>Cselekmény</h2></div>
+<div class="scene" id="j-1"><span class="scene-no">1. jelenet · Inn</span><h4>Arrival</h4>
+  <p>Meet <a class="xref" href="#c-boss">the boss</a> at <a class="xref" href="#l-inn">the inn</a>.</p></div>
+<div class="scene" id="j-2"><span class="scene-no">2. jelenet · Cellar</span><h4>Below</h4>
+  <p>Find <a class="xref" href="#item-key">the key</a>.</p></div>
+<div class="scene" id="j-3"><span class="scene-no">3. jelenet · Night</span><h4>The Hunt</h4>
+  <p>Face <a class="xref" href="#m-wolf">the wolf</a>.</p></div></section>
+</body></html>

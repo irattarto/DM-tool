@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=RPG Database Manager
+Comment=Campaign manager for tabletop RPG game masters
+Exec=rpg-database-manager
+Icon=rpg-database-manager
+Categories=Game;Utility;
+Terminal=false
