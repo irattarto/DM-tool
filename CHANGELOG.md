@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-12 (pre-release 1.9.0-beta.3)
+
+Pre-release: adventure modules as filters, entity files (import and export), places inside places, quests in HTML modules, Tab completion and the other helpers below. The database schema is now v11.
+
 ### Changed
 - **Names found in the text** are now a list where each name can be edited (which part is the link or the title) and set to **Link to: <existing entry>** (one choice per entry it may mean, e.g. "Abernaty" -> "Dr. Walter Abernaty"), **Create new <type>**, Skip (remembered for that entry) or Never. A full existing title is linked by default; "Find Mira Thornwood" is cut down to the known "Mira Thornwood".
 
-### Fixed
+### Fixed (since the first beta)
 - New names found: a short form of an existing entry ("Abernaty" for "Dr. Walter Abernaty", also with an ending such as "Abernatyval") is no longer offered as a new entry; common words such as "Lásd", "See" or "Meanwhile", labels like **Goal:** and abbreviations (HP, DC) are not offered either, and a single capitalised word must appear inside a sentence at least once.
 - The "deleted - Undo" message was an empty white box from the second delete on (it read its own colours back); it is readable every time now.
-
-## [1.9.0] - 2026-10-12 (pre-release 1.9.0-beta.2)
-
-Pre-release: adventure modules as filters, entity files (import and export), places inside places, quests in HTML modules, Tab completion and the other helpers below. The database schema is now v11.
 
 ### Added
 - **Quests in HTML modules.** The importer now reads quest cards: ids starting with `q-` become quests and `goal-` becomes a quest with the subtype "goal" (they appear in the Quests list, are linked to the people and places they mention, and show in the import preview). The HTML Module Guide has a new "Quests and goals" part (how to write the goal, who gives it, the reward and the status), a checklist line and an example in the module template. Quests that were only prose in an earlier module are not imported; they need a card.
