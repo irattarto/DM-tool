@@ -103,21 +103,41 @@ _STOP_WORDS = frozenset(w.casefold() for w in (
     "September October November December Session Notes Note Race Faction Name Description Tags Modules Date Status "
     "Participants Plan Summary Goals Goal Hook Hooks Scene Scenes Quest Location NPC Item Event Setting Module "
     "Roll Check DC HP AC Some Each Every After Before During While Once Meanwhile Suddenly Later Finally Also "
-    "Az Egy És Vagy De Hogy Nem Igen Ez Ott Itt Aztán Majd Közben Később".split()))
+    "See Because However Therefore Otherwise Although Though Since Until Unless Yet Still Now Today Tomorrow Yesterday "
+    "Goal Reward Given Appearance Background Personality Motivation Secrets Secret Stats Equipment Gear Loot Hooks "
+    "Az Egy És Vagy De Hogy Nem Igen Ez Ott Itt Aztán Majd Közben Később Lásd Pl Azaz Illetve Továbbá Ezért Mert "
+    "Viszont Ha Amikor Miközben Azután Ekkor Minden Néhány Sok Kevés Mivel Bár Hiszen Tehát Vagyis Ráadásul Szintén "
+    "Csak Még Már Is Nincs Van Lehet Kell Fontos Megjegyzés Jegyzet Cél Jutalom Állapot Státusz Leírás Megjelenés "
+    "Háttér Személyiség Képességek Felszerelés Kapcsolatok Teendők Ezek Azok Ők Ő Mi Ti Én Te Ön Ki Mit Hol Mikor "
+    "Miért Hogyan Melyik Valaki Valami Senki Semmi Hétfő Kedd Szerda Csütörtök Péntek Szombat Vasárnap".split()))
 
 
 def find_new_names(text: str, known_titles: Iterable[str], ignored: Iterable[str] = (),
                    limit: int = 12) -> List[str]:
     """Capitalised names in ``text`` that match no entry yet: candidates for new entries.
 
-    A name is one to four capitalised words (with "of", "the"...). A single capitalised word at the start of a
-    sentence is not enough evidence; it counts only if it appears more than once or in the middle of a sentence.
+    A name is one to four capitalised words (with "of", "the"...). A single capitalised word counts only if it shows
+    up inside a sentence at least once. A name that is part of an existing entry's title ("Abernaty" for "Dr. Walter
+    Abernaty", also with an ending such as "Abernatyval") is that entry, not a new one.
     Text inside links is ignored.
     """
     plain = re.sub(r'\[([^\]]*)\]\([^)]*\)', ' ', text)                  # links are known already
     plain = re.sub(r'```.*?```|`[^`]*`', ' ', plain, flags=re.S)
+    plain = plain.replace('*', '')                                       # **Goal:** and *emphasis*
     plain = re.sub(r'^[ \t]*(?:[A-Za-zÁ-ű ]{1,30}):[ \t]', ' ', plain, flags=re.M)   # "Race: " style labels
-    known = {fold_text(t) for t in known_titles} | {fold_text(i) for i in ignored}
+    titles = list(known_titles)
+    known = {fold_text(t) for t in titles} | {fold_text(i) for i in ignored}
+    # the words of every existing title: "Abernaty" is not new when "Dr. Walter Abernaty" exists
+    title_words = [set(re.findall(r'\w+', fold_text(t))) for t in titles]
+    word_stems = {w for words in title_words for w in words if len(w) >= 5}   # "Abernatyval" starts with "abernaty"
+
+    def is_part_of_known(candidate: str) -> bool:
+        words = re.findall(r'\w+', fold_text(candidate))
+        if not words:
+            return False
+        if any(set(words) <= known_words for known_words in title_words):
+            return True
+        return all(any(w.startswith(stem) for stem in word_stems) for w in words)
     counts: Dict[str, int] = {}
     mid_sentence: Dict[str, bool] = {}
     for match in _NAME_RE.finditer(plain):
@@ -134,11 +154,17 @@ def find_new_names(text: str, known_titles: Iterable[str], ignored: Iterable[str
         name = ' '.join(words)
         if len(name) < 3 or fold_text(name) in known or name.casefold() in _STOP_WORDS:
             continue
+        if len(words) == 1 and name.isupper() and len(name) <= 5:         # HP, DC, NPC, AC...
+            continue
+        if is_part_of_known(name):
+            continue
         before = plain[:match.start()].rstrip(' \t')
         starts_sentence = (not before) or before[-1] in '.!?\n:;"“'
         counts[name] = counts.get(name, 0) + 1
         mid_sentence[name] = mid_sentence.get(name, False) or not starts_sentence
-    found = [n for n in counts if len(n.split()) > 1 or counts[n] > 1 or mid_sentence[n]]
+    # one capitalised word is a name only if it shows up inside a sentence at least once: words that only ever start
+    # sentences ("Lásd", "Meanwhile") are just words
+    found = [n for n in counts if len(n.split()) > 1 or mid_sentence[n]]
     return sorted(found, key=lambda n: (-counts[n], natural_key(n)))[:limit]
 
 

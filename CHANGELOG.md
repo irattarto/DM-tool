@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- New names found: a short form of an existing entry ("Abernaty" for "Dr. Walter Abernaty", also with an ending such as "Abernatyval") is no longer offered as a new entry; common words such as "Lásd", "See" or "Meanwhile", labels like **Goal:** and abbreviations (HP, DC) are not offered either, and a single capitalised word must appear inside a sentence at least once.
+- The "deleted - Undo" message was an empty white box from the second delete on (it read its own colours back); it is readable every time now.
+
 ## [1.9.0] - 2026-10-12 (pre-release 1.9.0-beta.2)
 
 Pre-release: adventure modules as filters, entity files (import and export), places inside places, quests in HTML modules, Tab completion and the other helpers below. The database schema is now v11.

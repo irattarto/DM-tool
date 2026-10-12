@@ -36,11 +36,11 @@ def test_known_names_become_links_but_links_stay():
 
 
 def test_new_names_are_found_only_when_they_look_like_names():
-    text = ("The party meets Brannoch Gale at dawn. Then they visit the Pale Court. Kaz waits. Kaz lies. "
+    text = ("The party meets Brannoch Gale at dawn. Then they visit the Pale Court. Kaz waits. They ask Kaz about it. "
             "Monday was cold. Race: Elf. Later Iron Guild men come. See [Mira Thornwood](rpg://npc/1).")
     found = find_new_names(text, ["Iron Guild", "Mira Thornwood"])
     assert "Brannoch Gale" in found and "Pale Court" in found or "The Pale Court" in found
-    assert "Kaz" in found                                           # twice
+    assert "Kaz" in found                                           # inside a sentence ('meets Kaz')
     assert not {"Monday", "Race", "Iron Guild", "Mira Thornwood", "The", "Later"} & set(found)
     assert "Brannoch Gale" not in find_new_names(text, [], ignored=["brannoch gale"])
 
@@ -113,3 +113,16 @@ def test_escape_ignores_and_tab_without_a_suggestion_works_as_usual(app):
         assert not edit.completer.active
     finally:
         edit.close()
+
+
+def test_short_forms_of_existing_names_are_not_new_but_inflected_forms_too():
+    known = ["Dr. Walter Abernaty", "Iron Guild"]
+    text = "They meet Abernaty at noon. Walter Abernaty agrees. Later they thank Abernatyval and Walter. Then Brannoch Gale comes."
+    assert find_new_names(text, known) == ["Brannoch Gale"]
+    assert "Abernaty" in find_new_names(text, [])                      # without the entry it is a new name
+
+
+def test_words_that_only_start_sentences_are_not_names():
+    text = "Lásd a térképet. Lásd a jegyzetet. Meanwhile it rains. Meanwhile it stops. HP and DC are fine. They meet Kaz."
+    assert find_new_names(text, []) == ["Kaz"]
+    assert find_new_names("**Goal:** find Mira Thornwood.\n**Reward:** gold.", []) == ["Mira Thornwood"]

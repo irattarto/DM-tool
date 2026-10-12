@@ -195,3 +195,26 @@ def test_palette_opens_entries_and_runs_actions(app):
     palette._activate(palette.results.currentItem())
     app.processEvents()
     assert calls == ["npcs"]
+
+
+def test_the_undo_message_stays_readable_every_time(app):
+    """The second message used to read the first one's colours back and draw text on its own colour."""
+    import re
+    from PyQt6.QtWidgets import QMainWindow
+    from gui.components.undo_toast import UndoToast
+
+    window = QMainWindow()
+    window.resize(600, 400)
+    toast = UndoToast(window)
+    window.show()
+    try:
+        for text in ("'Kaz' deleted", "'Iron Guild' deleted", "'Mira' deleted"):
+            toast.show_message(text, 5000)
+            sheet = toast.styleSheet()
+            background = re.search(r"#undoToast \{ background: (#[0-9a-fA-F]+)", sheet).group(1)
+            foreground = re.search(r"QLabel \{ color: (#[0-9a-fA-F]+)", sheet).group(1)
+            assert background.lower() != foreground.lower(), sheet
+            assert toast.label.text() == text and toast.isVisible()
+    finally:
+        toast.dismiss()
+        window.close()

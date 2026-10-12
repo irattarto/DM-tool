@@ -2,7 +2,7 @@
 
 from PyQt6.QtCore import QEvent, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QPalette
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
+from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton
 
 
 class UndoToast(QFrame):
@@ -32,7 +32,10 @@ class UndoToast(QFrame):
         self.hide()
 
     def show_message(self, text: str, milliseconds: int = 10000) -> None:
-        palette = self.palette()
+        # Colours come from the window's palette, never from this widget's own: its style sheet changes its palette,
+        # so the second message would have read the first message's colours back and drawn text on its own colour
+        parent = self.parentWidget()
+        palette = parent.palette() if parent is not None else QApplication.palette()
         background = palette.color(QPalette.ColorRole.Text).name()
         foreground = palette.color(QPalette.ColorRole.Window).name()
         self.setStyleSheet(
