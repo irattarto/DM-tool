@@ -21,7 +21,7 @@ _IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
 
 def _is_entity_id(ref: str) -> bool:
     """Links to section anchors (#karavan) are fine; only entity-style ids must exist."""
-    return ref.split('-')[0] in ('c', 'g', 'm', 'f', 'l', 'h', 'j', 'item', 'gift', 'pw', 'hook') and '-' in ref
+    return ref.split('-')[0] in ('c', 'g', 'm', 'f', 'l', 'h', 'j', 'item', 'gift', 'pw', 'hook', 'q', 'goal') and '-' in ref
 
 
 def validate(path) -> tuple:

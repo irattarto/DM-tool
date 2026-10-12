@@ -31,6 +31,8 @@ Every entry needs a **unique id** that starts with one of these prefixes. Ids ar
 | `item-`, `gift-`, `pw-` | Item (normal, gift, spell) | `details.card` or `div.card` with an `h4` |
 | `h-` | Item (handout) | `details.room` |
 | `hook-` | Character (hook) | `div.hook-box`, optionally `data-character="Name"` (one per player character) |
+| `q-` | Quest | `details.card` or `div.card` with an `h4` (see "Quests and goals" in section 4) |
+| `goal-` | Quest (a goal or objective) | the same card as a quest |
 | `j-` | Event (scene) | `div.scene` with `.scene-no` and `h4` |
 
 Ids on `h2`, `h3`, `a` and `span` are only anchors for links. They do **not** create entries.
@@ -88,6 +90,30 @@ A faction, a location and an item:
   <div class="card-body"><p>Opens the cellar.</p></div>
 </details>
 ```
+
+### Quests and goals
+
+Every quest, mission, task or goal of the story is a card with its own id: `q-` for a quest, `goal-` for a goal or objective (of the party, a character or a faction). Both become entries of the **Quests** list (a goal has the subtype "goal"). Write them like this so the DM sees what to do at a glance:
+
+```html
+<details class="card" id="q-cellar">
+  <summary class="card-summary"><span class="badge b-ally">open</span><h4>Find the hidden cellar</h4></summary>
+  <div class="card-body">
+    <p><b>Goal:</b> Find the cellar under <a class="xref" href="#l-yard">the yard</a> and open it.</p>
+    <p><b>Given by:</b> <a class="xref" href="#c-boss">Big Boss</a></p>
+    <p><b>Reward:</b> 200 gold and the guild's trust.</p>
+    <p><b>Status:</b> open</p>
+    <ul><li>Learn where the key is (<a class="xref" href="#item-key">Rusty Key</a>)</li><li>Get past the guards</li></ul>
+  </div>
+</details>
+
+<div class="card" id="goal-guild-trust"><h4>Win the guild's trust</h4><p>Reached when <a class="xref" href="#q-cellar">the cellar</a> is open.</p></div>
+```
+
+- Put the **goal**, who **gives** it, the **reward** and the **status** (`open`, `active`, `done`, `failed`) in labelled lines (`<b>Goal:</b> ...`). They stay as text in the quest's notes.
+- Link the people, places and items it involves with `<a class="xref" href="#...">`: the links become links in the app and the quest shows up under "Mentioned in" of each of them.
+- Steps of a quest are a list inside the card. Give a step its own `goal-` card only if other cards must link to it.
+- One quest is one card. Do not put several quests in one card, and do not leave quests only as prose in a scene: a quest without a card is not imported.
 
 A minor NPC as a table row, and a scene:
 
@@ -198,6 +224,7 @@ Instead of relying on the markup, a generator can write the data itself, either 
 - [ ] Every NPC, minor NPC and creature has the visible `.npc-faction` line (`f-...`, `none`, `unknown` or `undecided`), and the module has catch-all faction cards
 - [ ] Gear is a `.gear` list with one `<li>` per item, the item name in `<b>`
 - [ ] Every picture exists under `images/` and is referenced with a relative path; the main picture has `data-gen-id` equal to the card id
+- [ ] Every quest and goal of the story is its own `q-` / `goal-` card with the goal, who gives it, the reward and the status
 - [ ] Scenes are `div.scene` with `.scene-no` and `h4`
 - [ ] The import preview shows no warnings you did not expect
 

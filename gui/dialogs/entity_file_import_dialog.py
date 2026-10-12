@@ -3,7 +3,7 @@
 from typing import Dict, Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
+from PyQt6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QRadioButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout)
 
 from config.entity_types import get_registry
@@ -85,6 +85,9 @@ class EntityFileImportDialog(QDialog):
             self.radio_none.setChecked(True)
         self.attach_group.buttonToggled.connect(lambda *_: self._fill_tree())
 
+        self.create_factions = QCheckBox("Create factions that the entries name but that do not exist yet")
+        self.create_factions.setChecked(True)
+        layout.addWidget(self.create_factions)
         self.summary = QLabel()
         layout.addWidget(self.summary)
         buttons = QDialogButtonBox()
@@ -101,13 +104,14 @@ class EntityFileImportDialog(QDialog):
     # ------------------------------------------------------------------ preview
 
     def options(self) -> AttachOptions:
+        create = self.create_factions.isChecked()
         if self.radio_chosen.isChecked() and self.module_combo.currentData() is not None:
-            return AttachOptions(ATTACH_CHOSEN, module_doc_id=self.module_combo.currentData())
+            return AttachOptions(ATTACH_CHOSEN, module_doc_id=self.module_combo.currentData(), create_missing_factions=create)
         if self.radio_new.isChecked():
-            return AttachOptions(ATTACH_NEW, new_module_title=self.new_name.text())
+            return AttachOptions(ATTACH_NEW, new_module_title=self.new_name.text(), create_missing_factions=create)
         if self.radio_none.isChecked():
-            return AttachOptions(ATTACH_NONE)
-        return AttachOptions(ATTACH_FILE)
+            return AttachOptions(ATTACH_NONE, create_missing_factions=create)
+        return AttachOptions(ATTACH_FILE, create_missing_factions=create)
 
     def _module_text(self, item) -> str:
         options = self.options()

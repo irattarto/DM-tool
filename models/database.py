@@ -1651,6 +1651,43 @@ Notes:
             log_database_operation("INSERT", "document_relationships", cursor.lastrowid)
             return cursor.lastrowid
 
+    def get_parent_links(self, campaign_id: int, relationship_type: str = 'located_in') -> Dict[int, int]:
+        """entry id -> id of the entry it is located in (a street in a district, a district in a city)."""
+        with self.connection.transaction() as conn:
+            cursor = conn.execute("""
+                SELECT dr.from_document_id, dr.to_document_id
+                FROM document_relationships dr
+                JOIN documents d ON d.id = dr.from_document_id
+                WHERE dr.relationship_type = ? AND d.module_id = ?
+            """, (relationship_type, campaign_id))
+            return {row[0]: row[1] for row in cursor.fetchall()}
+
+    def set_parent_link(self, document_id: int, parent_id: Optional[int], relationship_type: str = 'located_in') -> bool:
+        """Place an entry inside another one (None takes it out). False when that would put a place inside itself."""
+        if parent_id is not None:
+            if parent_id == document_id:
+                return False
+            with self.connection.transaction() as conn:
+                seen, current = set(), parent_id
+                while current is not None and current not in seen:     # walk up: the entry must not be one of its own parents
+                    if current == document_id:
+                        return False
+                    seen.add(current)
+                    row = conn.execute("""
+                        SELECT to_document_id FROM document_relationships
+                        WHERE from_document_id = ? AND relationship_type = ?
+                    """, (current, relationship_type)).fetchone()
+                    current = row[0] if row else None
+        with self.connection.transaction() as conn:
+            conn.execute("DELETE FROM document_relationships WHERE from_document_id = ? AND relationship_type = ?",
+                         (document_id, relationship_type))
+            if parent_id is not None:
+                conn.execute("""
+                    INSERT OR IGNORE INTO document_relationships (from_document_id, to_document_id, relationship_type)
+                    VALUES (?, ?, ?)
+                """, (document_id, parent_id, relationship_type))
+        return True
+
     def get_document_versions(self, document_id: int) -> List[Dict[str, Any]]:
         """Earlier versions of an entry, newest first (id, title, content, saved_date)."""
         with self.connection.transaction() as conn:

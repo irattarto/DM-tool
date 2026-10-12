@@ -90,6 +90,8 @@ The **Scope** button in the top bar (next to the campaign) shows the whole campa
 - **Map...** (editor) or right-click > **Relationship map...** draws what an entry is connected to; click a node to move around.
 - **History...** shows the earlier versions of an entry (each save keeps the last 20) and restores one.
 - Turn these helpers on or off in **Tools > Automation**.
+- **Places inside places:** a location can be *Located in* another location (a street in a district, a district in a city). Set it in the editor, or select places and right-click > **Set 'Located in'**. The list can be sorted, grouped and filtered by it, and a filter on a city shows everything inside it.
+- The Faction box of an NPC ends with **+ Add new faction...**; **New faction...** is also in the right-click Set faction menu.
 
 #### Quick capture and health check
 

@@ -52,6 +52,8 @@ The importer recognises entities by the `id` of the element. Keep these prefixes
 | `item-`, `gift-`, `pw-` | Item | `details.card` / `div.card` with an `h4` title |
 | `h-` | Item (handout) | `details.room` |
 | `hook-` | Character (hook) | `div.hook-box`, optional `data-character="Name"` |
+| `q-` | Quest | `details.card` / `div.card` with an `h4` title |
+| `goal-` | Quest (subtype goal) | `details.card` / `div.card` with an `h4` title |
 | `j-` | Session | `div.scene` with `.scene-no` and an `h4` title |
 
 Other conventions used:

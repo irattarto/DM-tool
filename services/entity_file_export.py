@@ -37,6 +37,7 @@ def build_export(db, documents: List[dict], pack: str) -> ParsedEntityFile:
     campaign_id = documents[0]['module_id'] if documents else None
     everything = {d['id']: d for d in db.get_documents(campaign_id)} if campaign_id is not None else {}
     links = db.get_module_links(campaign_id) if campaign_id is not None else {}
+    parents = db.get_parent_links(campaign_id) if campaign_id is not None else {}
     ids: Dict[int, str] = {}
     used = set()
     for doc in documents:
@@ -60,6 +61,8 @@ def build_export(db, documents: List[dict], pack: str) -> ParsedEntityFile:
         faction = everything.get(meta.get('faction_id'))
         if faction is not None:
             entry.faction = faction['title']
+        if doc['entity_type'] == 'location' and parents.get(doc['id']) in everything:
+            entry.located_in = everything[parents[doc['id']]]['title']
         entry.tags = [str(t) for t in meta.get('tags', []) if isinstance(t, (str, int))] if isinstance(meta.get('tags'), list) else []
         entry.modules = sorted((everything[m]['title'] for m in links.get(doc['id'], []) if m in everything), key=natural_key)
         if doc['entity_type'] == 'session':
@@ -78,6 +81,8 @@ def to_markdown(parsed: ParsedEntityFile) -> str:
         lines.append(f"## {registry.label(entry.kind)}: {entry.title} {{#{entry.source_id}}}")
         if entry.faction:
             lines.append(f"faction: {entry.faction}")
+        if entry.located_in:
+            lines.append(f"located_in: {entry.located_in}")
         if entry.tags:
             lines.append(f"tags: {', '.join(entry.tags)}")
         if entry.image:
@@ -104,6 +109,8 @@ def to_json(parsed: ParsedEntityFile) -> dict:
         item = {"type": registry.label(entry.kind), "id": entry.source_id, "title": entry.title}
         if entry.faction:
             item["faction"] = entry.faction
+        if entry.located_in:
+            item["located_in"] = entry.located_in
         if entry.tags:
             item["tags"] = entry.tags
         if entry.image:

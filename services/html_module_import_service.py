@@ -626,7 +626,7 @@ class HtmlModuleImportService:
             if target in id_map:
                 doc_id, kind = id_map[target]
                 return f'[{text}](rpg://{kind}/{doc_id})'
-            if re.match(r'^(c|g|m|f|l|item|gift|pw|h|hook|j)-', target):
+            if re.match(r'^(c|g|m|f|l|item|gift|pw|h|hook|q|goal|j)-', target):
                 return text                       # target was not imported
             return f'[{text}](rpg://module/{module_id})'   # a section anchor of the module
         return _LINK_RE.sub(repl, content)

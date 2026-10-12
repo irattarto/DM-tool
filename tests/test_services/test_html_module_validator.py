@@ -21,7 +21,7 @@ def test_template_is_clean_once_its_picture_exists(tmp_path):
     (tmp_path / 'images' / 'portraits' / 'c-boss.jpg').write_bytes(b'x')
     errors, warnings, summary = validate(target)
     assert errors == []
-    assert 'scenes: 1  entities: 4' in summary[1]
+    assert 'scenes: 1  entities: 5' in summary[1]
     assert not any('no faction' in w for w in warnings)
 
 

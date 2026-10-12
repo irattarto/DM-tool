@@ -105,6 +105,8 @@ class EntityTabsMixin:
             labels, widths = labels + ['Module'], widths + [150]
         if entity_type not in ('module', 'session'):
             labels, widths = labels + ['Last seen'], widths + [120]   # the latest session that mentions the entry
+        if entity_type == 'location':
+            labels, widths = labels + ['Located in'], widths + [180]   # the place (city, road...) it is inside
         return labels, widths
 
     def _fill_entity_row(self, item: QTreeWidgetItem, doc: dict, entity_type: str,
@@ -148,6 +150,9 @@ class EntityTabsMixin:
             values.append(module_title)
             seen = self._last_seen_text(doc['id'])
             values.append(seen)
+        located_in = self._location_path(doc['id']) if entity_type == 'location' else ''
+        if entity_type == 'location':
+            values.append(located_in)
 
         for column, value in enumerate(values, start=1):
             item.setText(column, value)
@@ -159,8 +164,10 @@ class EntityTabsMixin:
             hue = 220  # a person without a faction gets a neutral blue
         else:
             hue = name_hue(doc.get('title', ''))
+        if entity_type == 'location' and located_in:
+            race_text = f"in {located_in}"      # the second line of a place says where it is
         item.setData(0, ROLE_ROW, {'race': race_text, 'faction': faction_text, 'module': module_title,
-                                   'last_seen': seen if entity_type != 'module' else '',
+                                   'last_seen': seen if entity_type != 'module' else '', 'located_in': located_in,
                                    'hue': hue, 'image': None, 'is_group': False})
 
     # Delete lives in the right-click menu and on the Delete key (always with a confirmation, then Undo).
@@ -175,20 +182,23 @@ class EntityTabsMixin:
 
         # Toolbar for this entity type
         toolbar_layout = QHBoxLayout()
+        toolbar_layout.setSpacing(10)
 
         # Filter (for this entity type only)
         filter_layout = QHBoxLayout()
-        filter_label = QLabel(f"Filter {label}:")
+        filter_label = QLabel("Filter:")      # short: the toolbar of a list can be crowded
         filter_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         filter_layout.addWidget(filter_label)
 
         search_edit = QLineEdit()
         search_edit.setPlaceholderText(f"Search {entity_type}...")
+        search_edit.setMinimumWidth(140)       # the toolbar of a list can be crowded: keep the search box usable
         search_edit.textChanged.connect(lambda text, et=entity_type: self._on_entity_search(text, et))
         filter_layout.addWidget(search_edit)
 
         toolbar_layout.addLayout(filter_layout)
         self._add_module_filter(toolbar_layout, entity_type)   # "Module:" box (see gui/module_scope.py)
+        self._add_location_filter(toolbar_layout, entity_type)  # "Located in:" box of the locations list
 
         # Post name + primary picture cards to Discord (kept on the left, away from Delete)
         from gui.discord_actions import DISCORD_ENTITY_TYPES
@@ -233,6 +243,8 @@ class EntityTabsMixin:
             group_combo.addItem("Module", 'module')
         if registry.has_capability(entity_type, CAP_FACTION_LINK):
             group_combo.addItem("Faction", 'faction')
+        if entity_type == 'location':
+            group_combo.addItem("Located in", 'located_in')
         saved_group = self.settings.get_entity_group_preference(entity_type)
         group_index = group_combo.findData(saved_group)
         group_combo.setCurrentIndex(group_index if group_index >= 0 else 0)
@@ -423,7 +435,8 @@ class EntityTabsMixin:
             groups: Dict[str, list] = {}
             for item in items:
                 groups.setdefault(item.data(0, ROLE_ROW).get(group_by) or '', []).append(item)
-            none_label = f"No {group_by}"
+            none_label = {'located_in': "Not located in a place", 'module': "No module",
+                          'faction': "No faction"}.get(group_by, f"No {group_by}")
             names = sorted((name for name in groups if name), key=natural_key)
             if '' in groups:
                 names.append('')  # entries without a value come last
@@ -567,6 +580,8 @@ class EntityTabsMixin:
             rows.append(("Module", info.get('module', ''), None))
         if info.get('last_seen'):
             rows.append(("Last seen", self._last_seen_detail(document['id']), None))
+        if entity_type == 'location':
+            rows.append(("Located in", info.get('located_in', ''), None))
         for column_label, caption in (('Created Date', 'Created'), ('Modified Date', 'Modified')):
             if column_label in labels:
                 rows.append((caption, item.text(labels.index(column_label)), None))

@@ -108,6 +108,8 @@ class DocumentViewerWindow(QMainWindow):
         return None
 
     _RELATION_LABELS = {
+        ('located_in', 'out'): "Located in",
+        ('located_in', 'in'): "Places inside",
         ('belongs_to_module', 'out'): "Part of module",
         ('belongs_to_module', 'in'): "Contents of this module",
         ('appears_in_session', 'out'): "Appears in sessions",
@@ -231,6 +233,96 @@ class DocumentViewerWindow(QMainWindow):
                 cursor.mergeCharFormat(link)
                 return
             cursor = document.find(name, cursor, flags)
+
+    _NEW_CHOICE = "__new__"      # data of the "+ Add new..." entries of the drop-downs
+
+    def _fill_location_combo(self):
+        """The places this one can be located in: every other place except the ones inside it."""
+        from utils.natural_sort import natural_key
+        combo = self.location_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("(Nowhere)", None)
+        try:
+            places = {d['id']: d['title'] for d in self.db.get_document_summaries(self.document.module_id)
+                      if d['entity_type'] == 'location'}
+            parents = self.db.get_parent_links(self.document.module_id)
+        except Exception as e:
+            self.logger.warning(f"Could not load the places: {e}")
+            places, parents = {}, {}
+        inside, pending = {self.document.id}, [self.document.id]
+        while pending:
+            owner = pending.pop()
+            for child, parent in parents.items():
+                if parent == owner and child not in inside:
+                    inside.add(child)
+                    pending.append(child)
+
+        def path(place_id):
+            names, seen, current = [], {place_id}, parents.get(place_id)
+            while current is not None and current not in seen and current in places:
+                seen.add(current)
+                names.append(places[current])
+                current = parents.get(current)
+            return " \u203a ".join(reversed(names))
+
+        for place_id, title in sorted(((p, t) for p, t in places.items() if p not in inside),
+                                      key=lambda pair: natural_key(path(pair[0]) + pair[1])):
+            prefix = path(place_id)
+            combo.addItem(f"{prefix} \u203a {title}" if prefix else title, place_id)
+        combo.addItem("+ Add new place...", self._NEW_CHOICE)
+        current = parents.get(self.document.id)
+        index = combo.findData(current) if current is not None else 0
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        self._last_location_index = combo.currentIndex()
+        combo.blockSignals(False)
+
+    def _on_location_choice_changed(self, index: int):
+        combo = self.location_combo
+        if combo.itemData(index) == self._NEW_CHOICE:
+            from PyQt6.QtWidgets import QInputDialog
+            name, ok = QInputDialog.getText(self, "New place", "Name of the new place:")
+            name = name.strip()
+            combo.blockSignals(True)
+            if ok and name:
+                place_id = self._create_entry_for_text('location', name)
+                if place_id:
+                    combo.insertItem(combo.count() - 1, name, place_id)
+                    combo.setCurrentIndex(combo.count() - 2)
+                else:
+                    combo.setCurrentIndex(self._last_location_index)
+            else:
+                combo.setCurrentIndex(self._last_location_index)
+            combo.blockSignals(False)
+            index = combo.currentIndex()
+        self._last_location_index = index
+        self._on_session_field_changed()
+
+    def _on_faction_choice_changed(self, index: int):
+        """"+ Add new faction..." asks for a name, creates the faction and chooses it."""
+        combo = self.faction_combo
+        if combo.itemData(index) != self._NEW_CHOICE:
+            self._last_faction_index = index
+            return
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "New faction", "Name of the new faction:")
+        name = name.strip()
+        combo.blockSignals(True)
+        chosen = self._last_faction_index
+        if ok and name:
+            existing = combo.findText(name, Qt.MatchFlag.MatchFixedString)     # case-insensitive: the same faction again
+            if existing >= 0 and combo.itemData(existing) != self._NEW_CHOICE:
+                chosen = existing
+            else:
+                faction_id = self._create_entry_for_text('faction', name)
+                if faction_id:
+                    combo.insertItem(combo.count() - 1, name, faction_id)
+                    chosen = combo.count() - 2
+        combo.setCurrentIndex(chosen)
+        combo.blockSignals(False)
+        self._last_faction_index = chosen
+        if chosen != index:
+            self._on_session_field_changed()
 
     def _module_choices(self):
         """The adventure modules of the campaign, and the ones this entry belongs to now."""
@@ -383,6 +475,14 @@ class DocumentViewerWindow(QMainWindow):
             self.module_picker.selection_changed.connect(self._on_session_field_changed)
             info_layout.addWidget(self.module_picker)
 
+        # Where a place is (a street in a district, a district in a city)
+        if self.document.entity_type == 'location':
+            info_layout.addWidget(QLabel("Located in"))
+            self.location_combo = QComboBox()
+            self._fill_location_combo()
+            self.location_combo.currentIndexChanged.connect(self._on_location_choice_changed)
+            info_layout.addWidget(self.location_combo)
+
         # Session-specific fields (if entity type is session)
         if get_registry().has_capability(self.document.entity_type, CAP_SESSION):
             session_details_group = QGroupBox("Session Details")
@@ -424,6 +524,9 @@ class DocumentViewerWindow(QMainWindow):
             except Exception as e:
                 self.logger.error(f"Failed to load factions for metadata tab: {e}")
 
+            self.faction_combo.addItem("+ Add new faction...", self._NEW_CHOICE)
+            self._last_faction_index = 0
+            self.faction_combo.currentIndexChanged.connect(self._on_faction_choice_changed)
             self.faction_combo.currentIndexChanged.connect(self._on_session_field_changed)  # a faction change is unsaved too
             info_layout.addWidget(self.faction_combo)
 
@@ -718,6 +821,9 @@ class DocumentViewerWindow(QMainWindow):
             if success:
                 if hasattr(self, 'module_picker'):
                     self.db.set_document_modules(self.document.id, self.module_picker.selected_ids())
+                if hasattr(self, 'location_combo'):
+                    self.db.set_parent_link(self.document.id, self.location_combo.currentData()
+                                            if self.location_combo.currentData() != self._NEW_CHOICE else None)
                 # Save images if the image gallery exists
                 if hasattr(self, 'image_gallery'):
                     image_save_success = self.image_gallery.save_images(self.document.id)

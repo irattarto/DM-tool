@@ -50,8 +50,9 @@ Write the type word as in the program, in any letter case: `NPC`, `Faction`, `Lo
 
 | Property | For | Meaning |
 |---|---|---|
-| `faction` | NPC, Character | Name of a faction: one in the file, or one that exists in the campaign. |
+| `faction` | NPC, Character | Name of a faction: one in the file, or one that exists in the campaign. A faction that exists nowhere is created at the import (you can switch that off in the preview). |
 | `race` and any other `key: value` | any | Kept as a line `Key: value` at the top of the text (the lists read `Race:` from it). |
+| `located_in` | Location | Name of the place this place is inside: a street in a district, a district in a city. One in the file or in the campaign. |
 | `tags` | any | Comma separated words. |
 | `image` | any | Picture path, relative to the file (`images/boss.jpg`). It becomes the main picture. Only .jpg, .png and .webp inside the file's folder. |
 | `modules` | any | Modules of this entry (added to those in the front matter). |

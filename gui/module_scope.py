@@ -30,6 +30,10 @@ class ModuleScopeMixin:
         self._module_titles: Dict[int, str] = {}
         self.entity_module_filters: Dict[str, QComboBox] = {}
         self._list_module_filter: Dict[str, object] = {}   # entity type -> None | FILTER_NONE | module id
+        self._location_parents: Dict[int, int] = {}        # place -> the place it is located in
+        self._location_titles: Dict[int, str] = {}
+        self.entity_location_filters: Dict[str, QComboBox] = {}
+        self._list_location_filter: Dict[str, object] = {}  # entity type -> None | FILTER_NONE | place id
 
     # --- the links ---------------------------------------------------------------------------------------
 
@@ -37,6 +41,7 @@ class ModuleScopeMixin:
         """Read the modules of the open campaign and which entries belong to them."""
         if not self.current_module_id:
             self._module_links, self._module_titles = {}, {}
+            self._location_parents, self._location_titles = {}, {}
         else:
             try:
                 summaries = self.db.get_document_summaries(self.current_module_id)
@@ -44,15 +49,23 @@ class ModuleScopeMixin:
                 links = self.db.get_module_links(self.current_module_id)
                 self._module_links = {doc_id: {m for m in modules if m in self._module_titles}
                                       for doc_id, modules in links.items()}
+                self._location_titles = {d['id']: d['title'] for d in summaries if d['entity_type'] == 'location'}
+                self._location_parents = {child: parent for child, parent in
+                                          self.db.get_parent_links(self.current_module_id).items()
+                                          if child in self._location_titles and parent in self._location_titles}
             except Exception as e:
                 self.logger.warning(f"Could not read module links: {e}")
                 self._module_links, self._module_titles = {}, {}
+                self._location_parents, self._location_titles = {}, {}
         self._scope_modules &= set(self._module_titles)
         if not self._scope_all and not self._scope_modules and not self._scope_none:
             self._scope_all = True
         for entity_type, value in list(self._list_module_filter.items()):
             if isinstance(value, int) and value not in self._module_titles:
                 self._list_module_filter[entity_type] = None
+        for entity_type, value in list(self._list_location_filter.items()):
+            if isinstance(value, int) and value not in self._location_titles:
+                self._list_location_filter[entity_type] = None
         self._refresh_module_filters()
         self._update_scope_button()
 
@@ -79,9 +92,93 @@ class ModuleScopeMixin:
         links = self._module_links.get(doc_id, set())
         return not links if chosen == FILTER_NONE else chosen in links
 
+    # --- places inside places ("Located in") -------------------------------------------------------------
+
+    def _location_path(self, doc_id: int) -> str:
+        """Where a place is, from the outside in: "Chicago > Downtown" ('' for a place that is located nowhere)."""
+        names, seen, current = [], {doc_id}, self._location_parents.get(doc_id)
+        while current is not None and current not in seen:
+            seen.add(current)
+            names.append(self._location_titles.get(current, '?'))
+            current = self._location_parents.get(current)
+        return " \u203a ".join(reversed(names))
+
+    def _location_inside(self, place_id: int) -> set:
+        """The place and everything located inside it, at any depth."""
+        found, pending = {place_id}, [place_id]
+        while pending:
+            parent = pending.pop()
+            for child, owner in self._location_parents.items():
+                if owner == parent and child not in found:
+                    found.add(child)
+                    pending.append(child)
+        return found
+
+    def _passes_location_filter(self, entity_type: str, doc_id: int) -> bool:
+        chosen = self._list_location_filter.get(entity_type)
+        if chosen is None:
+            return True
+        if chosen == FILTER_NONE:
+            return doc_id not in self._location_parents
+        return doc_id in self._location_inside(chosen) and doc_id != chosen
+
+    def _add_location_filter(self, toolbar_layout, entity_type: str):
+        """A "Located in" box in the toolbar of the locations list."""
+        if entity_type != 'location':
+            return
+        toolbar_layout.addWidget(QLabel("Located in:"))
+        combo = QComboBox()
+        combo.setToolTip("Show only the places inside one place (at any depth), or the ones located nowhere")
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(8)
+        combo.currentIndexChanged.connect(lambda _i, et=entity_type: self._on_location_filter_changed(et))
+        toolbar_layout.addWidget(combo)
+        self.entity_location_filters[entity_type] = combo
+        self._fill_location_filter(entity_type)
+
+    def _fill_location_filter(self, entity_type: str):
+        combo = self.entity_location_filters.get(entity_type)
+        if combo is None:
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("All", None)
+        combo.addItem("Nowhere", FILTER_NONE)
+        for place_id, title in sorted(self._location_titles.items(), key=lambda pair: natural_key(self._location_path(pair[0]) + pair[1])):
+            path = self._location_path(place_id)
+            combo.addItem(f"{path} \u203a {title}" if path else title, place_id)
+        index = combo.findData(self._list_location_filter.get(entity_type))
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.blockSignals(False)
+
+    def _on_location_filter_changed(self, entity_type: str):
+        self._list_location_filter[entity_type] = self.entity_location_filters[entity_type].currentData()
+        self._populate_entity_list(entity_type)
+
+    def _bulk_set_location(self, entity_type: str, ids: List[int], parent_id: Optional[int]):
+        refused = [i for i in ids if not self.db.set_parent_link(i, parent_id)]
+        done = len(ids) - len(refused)
+        where = self._location_titles.get(parent_id, 'nowhere')
+        self.status_bar.showMessage(f"{done} of {len(ids)} places are now located in: {where}"
+                                    + (" (a place cannot be inside itself)" if refused else ""))
+        self._reload_module_links()
+        self._apply_scope()
+
+    def _bulk_new_location(self, entity_type: str, ids: List[int]):
+        title, ok = QInputDialog.getText(self, "New place", "Name of the new place:")
+        title = title.strip()
+        if not ok or not title:
+            return
+        from services.quick_entry import create_entry
+        parent_id = create_entry(self.db, self.template_service, self.current_module_id, 'location', title)
+        if parent_id:
+            self._reload_module_links()
+            self._bulk_set_location(entity_type, ids, parent_id)
+
     def _visible_in_list(self, entity_type: str, doc_id: int) -> bool:
         return (self._in_scope(doc_id, entity_type)
-                and (entity_type == 'module' or self._passes_list_filter(entity_type, doc_id)))
+                and (entity_type == 'module' or self._passes_list_filter(entity_type, doc_id))
+                and (entity_type != 'location' or self._passes_location_filter(entity_type, doc_id)))
 
     # --- scope selector in the top bar -------------------------------------------------------------------
 
@@ -182,6 +279,8 @@ class ModuleScopeMixin:
         toolbar_layout.addWidget(QLabel("Module:"))
         combo = QComboBox()
         combo.setToolTip("Show only the entries of one module in this list")
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(8)
         combo.currentIndexChanged.connect(lambda _i, et=entity_type: self._on_list_module_filter_changed(et))
         toolbar_layout.addWidget(combo)
         self.entity_module_filters[entity_type] = combo
@@ -204,6 +303,8 @@ class ModuleScopeMixin:
     def _refresh_module_filters(self):
         for entity_type in list(self.entity_module_filters):
             self._fill_module_filter(entity_type)
+        for entity_type in list(self.entity_location_filters):
+            self._fill_location_filter(entity_type)
 
     def _on_list_module_filter_changed(self, entity_type: str):
         self._list_module_filter[entity_type] = self.entity_module_filters[entity_type].currentData()
@@ -239,10 +340,27 @@ class ModuleScopeMixin:
 
         callbacks[menu.addAction(f"Export as entity file...{many}")] = lambda: self._export_entities(documents)
 
+        if entity_type == 'location':
+            blocked = set()
+            for doc_id in ids:
+                blocked |= self._location_inside(doc_id)         # a place cannot go inside itself or what it contains
+            inside_menu = menu.addMenu(f"Set 'Located in'{many}")
+            callbacks[inside_menu.addAction("(Nowhere)")] = lambda: self._bulk_set_location(entity_type, ids, None)
+            places = [(p, t) for p, t in self._location_titles.items() if p not in blocked]
+            if places:
+                inside_menu.addSeparator()
+            for place_id, title in sorted(places, key=lambda pair: natural_key(self._location_path(pair[0]) + pair[1])):
+                path = self._location_path(place_id)
+                callbacks[inside_menu.addAction(f"{path} \u203a {title}" if path else title)] = (
+                    lambda p=place_id: self._bulk_set_location(entity_type, ids, p))
+            inside_menu.addSeparator()
+            callbacks[inside_menu.addAction("New place...")] = lambda: self._bulk_new_location(entity_type, ids)
+
         if get_registry().has_capability(entity_type, CAP_FACTION_LINK):
             factions = [d for d in self.db.get_document_summaries(self.current_module_id) if d['entity_type'] == 'faction']
             faction_menu = menu.addMenu(f"Set faction{many}")
             callbacks[faction_menu.addAction("(None)")] = lambda: self._bulk_set_faction(entity_type, ids, None)
+            callbacks[faction_menu.addAction("New faction...")] = lambda: self._bulk_new_faction(entity_type, ids)
             if factions:
                 faction_menu.addSeparator()
             for faction in sorted(factions, key=lambda d: natural_key(d['title'])):
@@ -276,6 +394,23 @@ class ModuleScopeMixin:
         self._reload_module_links()
         self._load_entity_documents('module') if 'module' in self.entity_types else None
         self._bulk_set_module(entity_type, ids, module_doc_id, True)
+
+    def _bulk_new_faction(self, entity_type: str, ids: List[int]):
+        name, ok = QInputDialog.getText(self, "New faction", "Name of the new faction:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        existing = next((d for d in self.db.get_document_summaries(self.current_module_id)
+                         if d['entity_type'] == 'faction' and d['title'].casefold() == name.casefold()), None)
+        if existing is not None:
+            faction_id = existing['id']
+        else:
+            from services.quick_entry import create_entry
+            faction_id = create_entry(self.db, self.template_service, self.current_module_id, 'faction', name)
+            if faction_id and 'faction' in self.entity_types:
+                self._load_entity_documents('faction')
+        if faction_id:
+            self._bulk_set_faction(entity_type, ids, faction_id)
 
     def _bulk_set_faction(self, entity_type: str, ids: List[int], faction_id: Optional[int]):
         try:

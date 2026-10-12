@@ -21,6 +21,8 @@ Two input paths produce the same ``ParsedModule``:
    pw-    item (subtype spell)  div.card
    h-     item (subtype handout) details.room
    hook-  character (hook)      div.hook-box (one per player character)
+   q-     quest                 details.card / div.card
+   goal-  quest (subtype goal)  details.card / div.card (a goal or objective)
    j-     scene (importer: event) div.scene
    ====== ===================== ==============================================
 
@@ -49,9 +51,11 @@ PREFIX_MAP = {
     'pw': ('item', 'spell'),
     'h': ('item', 'handout'),
     'hook': ('character', 'hook'),     # "Karakterhorgok": one hook box per player character
+    'q': ('quest', ''),                # a quest, mission or task of the story
+    'goal': ('quest', 'goal'),         # a goal or objective (of the party, a character or a faction)
 }
 SESSION_PREFIX = 'j'
-_ID_RE = re.compile(r'^(c|g|m|f|l|item|gift|pw|h|hook|j)-[\w-]+$')
+_ID_RE = re.compile(r'^(c|g|m|f|l|item|gift|pw|h|hook|q|goal|j)-[\w-]+$')
 
 _VOID = frozenset({'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
                    'meta', 'param', 'source', 'track', 'wbr'})
@@ -707,7 +711,7 @@ def parse_html(html: str, source_path: str = "") -> ParsedModule:
 
     if not module.entities and not module.sessions:
         module.warnings.append(
-            'No entities or scenes found: give cards ids with the prefixes c- g- m- f- l- item- gift- pw- h- hook- j- '
+            'No entities or scenes found: give cards ids with the prefixes c- g- m- f- l- item- gift- pw- h- hook- q- goal- j- '
             '(see Help > Guides)')
     warn_node = root.find(None, 'warn')
     notice = text_of(warn_node) if warn_node is not None else ''

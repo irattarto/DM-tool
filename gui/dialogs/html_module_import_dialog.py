@@ -23,7 +23,7 @@ _ACTION_TEXT = {
     ACTION_UNCHANGED: 'Unchanged',
     ACTION_CONFLICT: 'Edited here - overwrite?',
 }
-_KIND_ORDER = ['module', 'session', 'character', 'npc', 'faction', 'location', 'item', 'event']
+_KIND_ORDER = ['module', 'session', 'character', 'npc', 'faction', 'location', 'item', 'quest', 'event']
 _NEW_FACTION_CHOICE = '__new_faction__'      # data of the "New faction..." entry of the drop-downs
 
 

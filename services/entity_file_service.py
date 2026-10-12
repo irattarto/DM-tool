@@ -84,6 +84,7 @@ class EntityEntry:
     source_id: str = ''
     body: str = ''
     faction: str = ''
+    located_in: str = ''                                    # title of the place this place is inside
     tags: List[str] = field(default_factory=list)
     image: str = ''
     modules: List[str] = field(default_factory=list)
@@ -171,9 +172,11 @@ def _finish_entry(entry: EntityEntry, lines: List[str], parsed: ParsedEntityFile
 
 
 def _apply_property(entry: EntityEntry, key: str, value: str) -> None:
-    low = key.casefold()
+    low = key.casefold().replace(' ', '_')
     if low == 'faction':
         entry.faction = value
+    elif low == 'located_in':
+        entry.located_in = value
     elif low == 'tags':
         entry.tags = split_list(value)
     elif low == 'image':
@@ -302,6 +305,7 @@ class AttachOptions:
     mode: str = ATTACH_FILE            # ATTACH_FILE, ATTACH_CHOSEN, ATTACH_NEW, ATTACH_NONE
     module_doc_id: Optional[int] = None
     new_module_title: str = ''
+    create_missing_factions: bool = True    # a faction named by an entry that exists nowhere is created
 
 
 @dataclass
@@ -452,6 +456,11 @@ class EntityFileService:
                                  'status': entry.status or 'planned', 'participants': entry.participants,
                                  'duration_minutes': None, 'session_type': 'game_session'})
                 faction_doc = faction_docs.get(entry.faction.casefold()) if entry.faction else None
+                if faction_doc is None and entry.faction and options.create_missing_factions and entry.kind != 'faction':
+                    new_faction = self.db.create_document(campaign_id, 'faction', entry.faction,
+                                                          f"Faction: {entry.faction}", created_by='user', status='draft')
+                    faction_doc = faction_docs[entry.faction.casefold()] = self.db.get_document(new_faction)
+                    result.created += 1
                 if faction_doc is not None:
                     meta['faction_id'] = faction_doc['id']
                 if item.existing_id is None:
@@ -483,6 +492,21 @@ class EntityFileService:
                 if meta.get('faction_id') != faction['id']:
                     meta['faction_id'] = faction['id']
                     self.db.update_document(doc_id, current['title'], current['content'], json.dumps(meta), record_history=False)
+
+        # where places are located: the named place, from this file or the campaign
+        places = {d['title'].casefold(): d['id'] for d in docs if d['entity_type'] == 'location'}
+        for item, doc_id in written:
+            if item.kind == 'location':
+                places[item.entry.title.casefold()] = doc_id
+        for item, doc_id in written:
+            wanted = item.entry.located_in.strip()
+            if item.kind != 'location' or not wanted:
+                continue
+            parent = places.get(wanted.casefold())
+            if parent is None:
+                result.errors.append(f"{item.title}: the place '{wanted}' was not found, so it is located nowhere.")
+            elif not self.db.set_parent_link(doc_id, parent):
+                result.errors.append(f"{item.title}: it cannot be located inside '{wanted}'.")
 
         # pass 2: links in the text, relationships, modules, pictures
         step += 1
