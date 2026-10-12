@@ -85,7 +85,7 @@ The **Scope** button in the top bar (next to the campaign) shows the whole campa
 #### Links, suggestions and connections
 
 - While you type in an entry, grey text completes the name of another entry. **Tab** accepts it and turns it into a link, **Esc** ignores it; with several matches a small list opens (Up/Down, then Tab or Enter). Select text, right-click and choose **Create entry from selection** to make a new entry of that name and link it.
-- After you save, names that match no entry yet are offered as **new entries**; choose a type or Skip, or Never.
+- After you save, capitalised names in the text that are not links yet are listed. For each you can edit the name (which part becomes the link or the title), then choose **Link to** an existing entry it may mean (a short "Abernaty" offers "Dr. Walter Abernaty"), **Create new** (NPC, Location...), Skip or Never.
 - The **Connections** tab shows **Mentioned in** (everything that links to this entry) and, for a session, **Cast and places**. The **Last seen** column of a list is the latest session that mentions the entry.
 - **Map...** (editor) or right-click > **Relationship map...** draws what an entry is connected to; click a node to move around.
 - **History...** shows the earlier versions of an entry (each save keeps the last 20) and restores one.

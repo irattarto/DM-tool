@@ -126,3 +126,41 @@ def test_words_that_only_start_sentences_are_not_names():
     text = "Lásd a térképet. Lásd a jegyzetet. Meanwhile it rains. Meanwhile it stops. HP and DC are fine. They meet Kaz."
     assert find_new_names(text, []) == ["Kaz"]
     assert find_new_names("**Goal:** find Mira Thornwood.\n**Reward:** gold.", []) == ["Mira Thornwood"]
+
+
+def test_candidates_offer_the_existing_entries_a_short_name_may_mean():
+    from utils.name_matching import find_name_candidates
+    entries = [NameEntry("Dr. Walter Abernaty", "npc", 1), NameEntry("Walter Black", "npc", 2),
+               NameEntry("Mira Thornwood", "npc", 3), NameEntry("Iron Guild", "faction", 4)]
+    text = ("They meet Abernaty at noon. Then Walter arrives. Find Mira Thornwood. Iron Guild men watch. "
+            "Brannoch Gale waits. Later Abernatyval talks.")
+    by_text = {c.text: c for c in find_name_candidates(text, entries)}
+    assert [e.title for e in by_text["Abernaty"].matches] == ["Dr. Walter Abernaty"] and not by_text["Abernaty"].exact
+    assert {e.title for e in by_text["Walter"].matches} == {"Dr. Walter Abernaty", "Walter Black"}     # the user picks
+    assert by_text["Mira Thornwood"].exact and by_text["Mira Thornwood"].matches[0].doc_id == 3         # "Find" is cut off
+    assert by_text["Iron Guild"].exact
+    assert by_text["Brannoch Gale"].matches == []
+    assert "Find Mira Thornwood" not in by_text and "Abernatyval" in by_text
+    # an entry never matches itself, and an unknown verb + name stays one editable candidate
+    own = find_name_candidates("Mira Thornwood smiles at Mira Thornwood", entries, exclude_ids=[3])
+    assert own == []
+    unknown = {c.text for c in find_name_candidates("Find Mira Thornwood.", [])}
+    assert unknown == {"Find Mira Thornwood"}
+
+
+def test_the_names_dialog_defaults_to_linking_full_titles_and_returns_edited_names(app):
+    from gui.dialogs.health_dialogs import CREATE, LINK, SKIP, NewNamesDialog
+    from utils.name_matching import NameCandidate
+    entries = [NameEntry("Dr. Walter Abernaty", "npc", 1), NameEntry("Iron Guild", "faction", 4)]
+    dialog = NewNamesDialog([NameCandidate("Iron Guild", [entries[1]], True), NameCandidate("Abernaty", [entries[0]]),
+                             NameCandidate("Find Brannoch Gale")])
+    try:
+        dialog.edits[2].setText("Brannoch Gale")                                     # which part is the name
+        dialog.combos[2].setCurrentIndex(dialog.combos[2].findText("Create new NPC"))
+        first, second, third = dialog.choices()
+        assert (first['action'], first['doc_id'], first['kind']) == (LINK, 4, "faction")
+        assert (second['action'], second['doc_id']) == (LINK, 1)                     # a short form of exactly one entry
+        assert third['action'] == SKIP or third['action'] == CREATE
+        assert (third['action'], third['kind'], third['name'], third['text']) == (CREATE, "npc", "Brannoch Gale", "Find Brannoch Gale")
+    finally:
+        dialog.deleteLater()

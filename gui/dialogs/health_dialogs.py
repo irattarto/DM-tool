@@ -3,39 +3,52 @@
 from typing import Dict, List, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QMessageBox, QPushButton,
-                             QScrollArea, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+                             QPushButton, QScrollArea, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from config.entity_types import get_registry
 from services.health_service import HealthIssue
+from utils.name_matching import NameCandidate
 
-SKIP, IGNORE = '', '__ignore__'
+SKIP, IGNORE, LINK, CREATE = 'skip', 'never', 'link', 'create'
 
 
 class NewNamesDialog(QDialog):
-    """Names in a text that match no entry: choose what each one is (or skip it, or never ask again)."""
+    """Names in a text that are not links yet. Each can be linked to an existing entry it may mean, turned into a new
+    entry, skipped, or never offered again; the name itself can be edited first (what part is the link or the title)."""
 
-    def __init__(self, names: List[str], parent=None):
+    def __init__(self, candidates: List[NameCandidate], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("New names found")
+        self.setWindowTitle("Names found in the text")
         self.setModal(True)
-        self.combos: Dict[str, QComboBox] = {}
+        self.candidates = candidates
+        self.edits: List[QLineEdit] = []
+        self.combos: List[QComboBox] = []
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("These names are not entries yet. Choose a type to create an entry and link the name,<br>"
-                                "or leave 'Skip'. 'Never' stops asking about that name."))
+        layout.addWidget(QLabel("These names are not links yet. Edit a name to change which part becomes the link or "
+                                "the title,<br>then choose what to do. 'Skip' leaves it for now, 'Never' stops asking."))
         holder = QWidget()
         rows = QVBoxLayout(holder)
         registry = get_registry()
         kinds = [k for k in registry.keys_for('create') if k not in ('session', 'character')]
-        for name in names:
+        for candidate in candidates:
             row = QHBoxLayout()
-            row.addWidget(QLabel(f"<b>{name}</b>"), 1)
+            edit = QLineEdit(candidate.text)
+            edit.setMinimumWidth(180)
+            self.edits.append(edit)
+            row.addWidget(edit, 1)
             combo = QComboBox()
-            combo.addItem("Skip", SKIP)
+            combo.setMinimumWidth(260)
+            combo.addItem("Skip", (SKIP, None, None))
+            for entry in candidate.matches[:8]:
+                combo.addItem(f"Link to: {entry.title} ({registry.label(entry.entity_type)})",
+                              (LINK, entry.doc_id, entry.entity_type))
             for kind in kinds:
-                combo.addItem(registry.label(kind), kind)
-            combo.addItem("Never", IGNORE)
-            self.combos[name] = combo
+                combo.addItem(f"Create new {registry.label(kind)}", (CREATE, None, kind))
+            combo.addItem("Never", (IGNORE, None, None))
+            if len(candidate.matches) == 1 or (candidate.matches and candidate.exact):
+                combo.setCurrentIndex(1)                      # one entry it can mean (or the full title): link it
+            self.combos.append(combo)
             row.addWidget(combo)
             rows.addLayout(row)
         rows.addStretch(1)
@@ -44,15 +57,20 @@ class NewNamesDialog(QDialog):
         scroll.setWidget(holder)
         layout.addWidget(scroll, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Create")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Apply")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        self.resize(460, min(120 + 36 * len(names), 520))
+        self.resize(640, min(130 + 38 * len(candidates), 560))
 
-    def choices(self) -> Dict[str, str]:
-        """name -> entity type key, SKIP or IGNORE."""
-        return {name: combo.currentData() for name, combo in self.combos.items()}
+    def choices(self) -> List[dict]:
+        """One dict per name: text (as found), name (as edited), action (skip/never/link/create), doc_id, kind."""
+        result = []
+        for candidate, edit, combo in zip(self.candidates, self.edits, self.combos):
+            action, doc_id, kind = combo.currentData()
+            result.append({'text': candidate.text, 'name': edit.text().strip() or candidate.text,
+                           'action': action, 'doc_id': doc_id, 'kind': kind})
+        return result
 
 
 class HealthCheckDialog(QDialog):

@@ -1,7 +1,7 @@
 """Finding names of entries in text: completion while typing, links for known names, and new names worth an entry."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from utils.natural_sort import fold_text, natural_key
@@ -112,37 +112,55 @@ _STOP_WORDS = frozenset(w.casefold() for w in (
     "Miért Hogyan Melyik Valaki Valami Senki Semmi Hétfő Kedd Szerda Csütörtök Péntek Szombat Vasárnap".split()))
 
 
-def find_new_names(text: str, known_titles: Iterable[str], ignored: Iterable[str] = (),
-                   limit: int = 12) -> List[str]:
-    """Capitalised names in ``text`` that match no entry yet: candidates for new entries.
+@dataclass
+class NameCandidate:
+    """A name found in a text that is not a link yet: new, or a (short) form of existing entries."""
+    text: str                                   # as written in the text
+    matches: List[NameEntry] = field(default_factory=list)   # existing entries it may mean, best first
+    exact: bool = False                         # the text is the full title of the first match
+    count: int = 1
 
-    A name is one to four capitalised words (with "of", "the"...). A single capitalised word counts only if it shows
-    up inside a sentence at least once. A name that is part of an existing entry's title ("Abernaty" for "Dr. Walter
-    Abernaty", also with an ending such as "Abernatyval") is that entry, not a new one.
-    Text inside links is ignored.
+
+def _words(text: str) -> Tuple[str, ...]:
+    return tuple(re.findall(r'\w+', fold_text(text)))
+
+
+def find_name_candidates(text: str, entries: Iterable[NameEntry], ignored: Iterable[str] = (),
+                         exclude_ids: Iterable[int] = (), limit: int = 20) -> List[NameCandidate]:
+    """Capitalised names in ``text`` that are not links: possible new entries, and mentions of existing entries.
+
+    - A name that is the title of an entry, or a part of a title ("Abernaty" for "Dr. Walter Abernaty", also with an
+      ending such as "Abernatyval"), comes with those entries as ``matches`` so it can be linked instead of created.
+    - A known title inside a longer run of capitalised words ("Find Mira Thornwood") is cut out: the candidate is the
+      known part.
+    - A single capitalised word that matches nothing counts only if it shows up inside a sentence at least once
+      ("Lásd", "Meanwhile" only ever start sentences).
+    Text inside links is ignored. ``exclude_ids`` (the entry being edited) never matches itself.
     """
+    skip_ids = set(exclude_ids)
+    pool = [e for e in entries if e.title]                  # the entry being edited stays in: its own name is no news
     plain = re.sub(r'\[([^\]]*)\]\([^)]*\)', ' ', text)                  # links are known already
     plain = re.sub(r'```.*?```|`[^`]*`', ' ', plain, flags=re.S)
     plain = plain.replace('*', '')                                       # **Goal:** and *emphasis*
     plain = re.sub(r'^[ \t]*(?:[A-Za-zÁ-ű ]{1,30}):[ \t]', ' ', plain, flags=re.M)   # "Race: " style labels
-    titles = list(known_titles)
-    known = {fold_text(t) for t in titles} | {fold_text(i) for i in ignored}
-    # the words of every existing title: "Abernaty" is not new when "Dr. Walter Abernaty" exists
-    title_words = [set(re.findall(r'\w+', fold_text(t))) for t in titles]
-    word_stems = {w for words in title_words for w in words if len(w) >= 5}   # "Abernatyval" starts with "abernaty"
+    ignored_folded = {fold_text(i) for i in ignored}
+    entry_words = [(e, _words(e.title)) for e in pool]
+    exact_index: Dict[Tuple[str, ...], List[NameEntry]] = {}
+    for entry, words in entry_words:
+        exact_index.setdefault(words, []).append(entry)
 
-    def is_part_of_known(candidate: str) -> bool:
-        words = re.findall(r'\w+', fold_text(candidate))
-        if not words:
-            return False
-        if any(set(words) <= known_words for known_words in title_words):
-            return True
-        return all(any(w.startswith(stem) for stem in word_stems) for w in words)
-    counts: Dict[str, int] = {}
+    def partial_matches(candidate: Tuple[str, ...]) -> List[NameEntry]:
+        found = []
+        for entry, words in entry_words:
+            have = set(words)
+            if all(w in have or any(len(x) >= 5 and w.startswith(x) for x in have) for w in candidate):
+                found.append(entry)
+        return sorted(found, key=lambda e: (len(e.title), natural_key(e.title)))
+
+    results: Dict[str, NameCandidate] = {}
     mid_sentence: Dict[str, bool] = {}
     for match in _NAME_RE.finditer(plain):
-        name = match.group(1).strip()
-        words = name.split()
+        words = match.group(1).strip().split()
         while words and words[0].casefold() in _STOP_WORDS:               # "The Pale Court" -> keep it, "Then Kaz" -> Kaz
             if words[0].casefold() == 'the' and len(words) > 1:
                 break
@@ -151,21 +169,51 @@ def find_new_names(text: str, known_titles: Iterable[str], ignored: Iterable[str
             words = words[:-1]
         if not words or len(words) > 4:
             continue
-        name = ' '.join(words)
-        if len(name) < 3 or fold_text(name) in known or name.casefold() in _STOP_WORDS:
+        if len(words) == 1 and (words[0].isupper() and len(words[0]) <= 5 or len(words[0]) < 3):   # HP, DC, NPC...
             continue
-        if len(words) == 1 and name.isupper() and len(name) <= 5:         # HP, DC, NPC, AC...
+        name, matches, exact = ' '.join(words), [], False
+        # a known title inside the run of words: the longest one wins ("Find Mira Thornwood" -> "Mira Thornwood")
+        found = None
+        for length in range(len(words), 0, -1):
+            for start in range(0, len(words) - length + 1):
+                segment = words[start:start + length]
+                if length == 1 and segment[0].casefold() in _STOP_WORDS:
+                    continue
+                known = exact_index.get(_words(' '.join(segment)))
+                if known:
+                    found = (' '.join(segment), known)
+                    break
+            if found:
+                break
+        if found:
+            name, matches, exact = found[0], list(found[1]), True
+        else:
+            matches = partial_matches(_words(name))
+        if len(name) < 3 or name.casefold() in _STOP_WORDS or fold_text(name) in ignored_folded:
             continue
-        if is_part_of_known(name):
-            continue
+        others = [e for e in matches if e.doc_id not in skip_ids]
+        if matches and not others:
+            continue                                                       # only the entry itself
+        matches = others
         before = plain[:match.start()].rstrip(' \t')
         starts_sentence = (not before) or before[-1] in '.!?\n:;"“'
-        counts[name] = counts.get(name, 0) + 1
-        mid_sentence[name] = mid_sentence.get(name, False) or not starts_sentence
-    # one capitalised word is a name only if it shows up inside a sentence at least once: words that only ever start
-    # sentences ("Lásd", "Meanwhile") are just words
-    found = [n for n in counts if len(n.split()) > 1 or mid_sentence[n]]
-    return sorted(found, key=lambda n: (-counts[n], natural_key(n)))[:limit]
+        key = fold_text(name)
+        if key in results:
+            results[key].count += 1
+        else:
+            results[key] = NameCandidate(name, matches, exact)
+        mid_sentence[key] = mid_sentence.get(key, False) or not starts_sentence
+    found_names = [c for key, c in results.items()
+                   if c.matches or len(c.text.split()) > 1 or mid_sentence.get(key)]
+    found_names.sort(key=lambda c: (not c.matches, -c.count, natural_key(c.text)))
+    return found_names[:limit]
+
+
+def find_new_names(text: str, known_titles: Iterable[str], ignored: Iterable[str] = (),
+                   limit: int = 12) -> List[str]:
+    """The names in ``text`` that match no existing title at all: candidates for new entries."""
+    entries = [NameEntry(title, '', index) for index, title in enumerate(known_titles)]
+    return [c.text for c in find_name_candidates(text, entries, ignored, limit=limit * 2) if not c.matches][:limit]
 
 
 def mention_spans(text: str, entry: NameEntry) -> Optional[Tuple[int, int]]:

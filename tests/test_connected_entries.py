@@ -102,7 +102,8 @@ def test_editor_offers_new_names_and_links_them(app, monkeypatch):
         viewer.show()
         viewer.content_edit.set_content("The party meets Brannoch Gale at dawn. Brannoch Gale smiles.")
         monkeypatch.setattr(health_dialogs.NewNamesDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
-        monkeypatch.setattr(health_dialogs.NewNamesDialog, "choices", lambda self: {"Brannoch Gale": "npc"})
+        monkeypatch.setattr(health_dialogs.NewNamesDialog, "choices", lambda self: [
+            {'text': "Brannoch Gale", 'name': "Brannoch Gale", 'action': 'create', 'doc_id': None, 'kind': 'npc'}])
         viewer._on_save()
         created = [d for d in db.get_documents(campaign, "npc") if d['title'] == "Brannoch Gale"]
         assert len(created) == 1
@@ -149,3 +150,42 @@ def test_health_check_leaves_out_abilities_and_inventory_items():
     db.create_document(campaign, "ability_item", "Imported Abilities (2)", "x")
     issues = check_campaign(db, campaign)
     assert not any("Imported Abilities" in d['title'] for i in issues for d in i.documents)
+
+
+def test_editor_links_a_short_name_to_the_existing_entry_instead_of_creating_one(app, monkeypatch):
+    from PyQt6.QtWidgets import QDialog
+    from config.settings import Settings
+    from gui.dialogs import health_dialogs
+    from gui.dialogs.document_viewer import DocumentViewerWindow
+    from gui.main_window import MainWindow
+    from models.document import Document
+
+    db, campaign, ids = _world()
+    walter = db.create_document(campaign, "npc", "Dr. Walter Abernaty", "Race: Human")
+    settings = Settings()
+    settings.set_last_module_id(campaign)
+    window = MainWindow(settings, db)
+    try:
+        viewer = DocumentViewerWindow(Document.from_dict(db.get_document(ids["S1"])), db, window)
+        viewer.show()
+        viewer.content_edit.set_content("The party meets Abernaty at dawn. Later Find Kaz Mirra waits.")
+        seen = {}
+
+        def choices(dialog):
+            seen['names'] = [(c.text, [m.title for m in c.matches]) for c in dialog.candidates]
+            return [{'text': "Abernaty", 'name': "Abernaty", 'action': 'link', 'doc_id': walter, 'kind': 'npc'},
+                    {'text': "Find Kaz Mirra", 'name': "Kaz Mirra", 'action': 'create', 'doc_id': None, 'kind': 'npc'}]
+
+        monkeypatch.setattr(health_dialogs.NewNamesDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+        monkeypatch.setattr(health_dialogs.NewNamesDialog, "choices", choices)
+        viewer._on_save()
+        assert ("Abernaty", ["Dr. Walter Abernaty"]) in seen['names']
+        saved = db.get_document(ids["S1"])['content']
+        assert f"[Abernaty](rpg://npc/{walter})" in saved
+        assert [d['title'] for d in db.get_documents(campaign, "npc") if "Abernaty" in d['title']] == ["Dr. Walter Abernaty"]
+        created = [d for d in db.get_documents(campaign, "npc") if d['title'] == "Kaz Mirra"]
+        assert len(created) == 1 and f"(rpg://npc/{created[0]['id']})" in saved        # the edited part became the link
+        viewer._is_dirty = False
+        viewer.close()
+    finally:
+        window.deleteLater()

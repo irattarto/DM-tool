@@ -178,38 +178,50 @@ class DocumentViewerWindow(QMainWindow):
     _IGNORED_NAMES_KEY = "ignored_names_{module_id}"
 
     def _offer_new_names(self):
-        """After a save: capitalised names that match no entry are offered as new entries (can be switched off)."""
+        """After a save: names in the text that are not links yet are offered - link to an existing entry, make a new
+        one, skip or never (can be switched off in Tools > Automation)."""
         from PyQt6.QtWidgets import QDialog
-        from gui.dialogs.health_dialogs import IGNORE, NewNamesDialog
-        from utils.name_matching import find_new_names
+        from gui.dialogs.health_dialogs import CREATE, IGNORE, LINK, SKIP, NewNamesDialog
+        from utils.name_matching import NameEntry, find_name_candidates
         window = self.main_window
         if (window is None or self._skip_name_offer or not self.isVisible() or self.document.entity_type == 'module'
                 or not window.automation_enabled('auto_new_names')):
             return
-        key = self._IGNORED_NAMES_KEY.format(module_id=self.document.module_id)
+        never_key = self._IGNORED_NAMES_KEY.format(module_id=self.document.module_id)
+        skip_key = f"skipped_names_doc_{self.document.id}"
         try:
-            ignored = json.loads(self.db.get_app_meta(key, '[]') or '[]')
-            titles = [d['title'] for d in self.db.get_document_summaries(self.document.module_id)]
+            never = json.loads(self.db.get_app_meta(never_key, '[]') or '[]')
+            skipped = json.loads(self.db.get_app_meta(skip_key, '[]') or '[]')
+            registry_types = set(get_registry().keys_for('context')) - {'module'}
+            entries = [NameEntry(d['title'], d['entity_type'], d['id']) for d in
+                       self.db.get_document_summaries(self.document.module_id) if d['entity_type'] in registry_types]
         except (TypeError, ValueError):
-            ignored, titles = [], []
-        names = find_new_names(self.document.content or '', titles, list(ignored) + list(self._offered_names))
-        if not names:
+            never, skipped, entries = [], [], []
+        candidates = find_name_candidates(self.document.content or '', entries,
+                                          list(never) + list(skipped) + list(self._offered_names),
+                                          exclude_ids=[self.document.id])
+        if not candidates:
             return
-        self._offered_names.update(names)
-        dialog = NewNamesDialog(names, self)
+        self._offered_names.update(c.text for c in candidates)
+        dialog = NewNamesDialog(candidates, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        created = False
-        for name, kind in dialog.choices().items():
-            if kind == IGNORE:
-                ignored.append(name)
-            elif kind:
-                doc_id = self._create_entry_for_text(kind, name)
+        changed = False
+        for choice in dialog.choices():
+            action, name = choice['action'], choice['name']
+            if action == IGNORE:
+                never.append(choice['text'])
+            elif action == SKIP:
+                skipped.append(choice['text'])
+            elif action == LINK:
+                changed |= self._link_first_mention(name, choice['kind'], choice['doc_id'], fallback=choice['text'])
+            elif action == CREATE:
+                doc_id = self._create_entry_for_text(choice['kind'], name)
                 if doc_id:
-                    self._link_first_mention(name, kind, doc_id)
-                    created = True
-        self.db.set_app_meta(key, json.dumps(sorted(set(ignored))))
-        if created:
+                    changed |= self._link_first_mention(name, choice['kind'], doc_id, fallback=choice['text'])
+        self.db.set_app_meta(never_key, json.dumps(sorted(set(never))))
+        self.db.set_app_meta(skip_key, json.dumps(sorted(set(skipped))))
+        if changed:
             self.content_edit.forget_names()
             self._skip_name_offer = True
             try:
@@ -217,22 +229,25 @@ class DocumentViewerWindow(QMainWindow):
             finally:
                 self._skip_name_offer = False
 
-    def _link_first_mention(self, name: str, kind: str, doc_id: int):
-        """Make the first plain mention of ``name`` in the text a link to the new entry."""
+    def _link_first_mention(self, name: str, kind: str, doc_id: int, fallback: str = '') -> bool:
+        """Make the first plain mention of ``name`` (else of ``fallback``, the name as it was found) a link to the entry.
+        True when a link was made."""
         from PyQt6.QtGui import QTextCharFormat, QTextDocument
         document = self.content_edit.document()
         flags = QTextDocument.FindFlag.FindCaseSensitively | QTextDocument.FindFlag.FindWholeWords
-        cursor = document.find(name, 0, flags)
-        while not cursor.isNull():
-            if not cursor.charFormat().isAnchor():
-                link = QTextCharFormat()
-                link.setAnchor(True)
-                link.setAnchorHref(f"rpg://{kind}/{doc_id}")
-                link.setForeground(self.content_edit.palette().link())
-                link.setFontUnderline(True)
-                cursor.mergeCharFormat(link)
-                return
-            cursor = document.find(name, cursor, flags)
+        for wanted in dict.fromkeys(n for n in (name, fallback) if n):
+            cursor = document.find(wanted, 0, flags)
+            while not cursor.isNull():
+                if not cursor.charFormat().isAnchor():
+                    link = QTextCharFormat()
+                    link.setAnchor(True)
+                    link.setAnchorHref(f"rpg://{kind}/{doc_id}")
+                    link.setForeground(self.content_edit.palette().link())
+                    link.setFontUnderline(True)
+                    cursor.mergeCharFormat(link)
+                    return True
+                cursor = document.find(wanted, cursor, flags)
+        return False
 
     _NEW_CHOICE = "__new__"      # data of the "+ Add new..." entries of the drop-downs
 
