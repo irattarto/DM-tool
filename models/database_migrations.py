@@ -21,7 +21,8 @@ class DatabaseMigration:
             7: self.migrate_to_v7_fix_schema_inconsistencies,
             8: self.migrate_to_v8_entity_types,
             9: self.migrate_to_v9_discord_channel,
-            10: self.migrate_to_v10_discord_guild
+            10: self.migrate_to_v10_discord_guild,
+            11: self.migrate_to_v11_document_versions
         }
 
     def get_current_version(self) -> int:
@@ -456,6 +457,38 @@ class DatabaseMigration:
         except Exception as e:
             conn.rollback()
             self.logger.error(f"Migration v10 failed: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def migrate_to_v11_document_versions(self):
+        """
+        Migration v10 → v11: earlier versions of entries (History in the editor).
+
+        Changes:
+        - Adds the document_versions table (text only, the last 20 versions per entry)
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS document_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT,
+                    saved_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_versions_document ON document_versions(document_id)")
+            conn.commit()
+            self.logger.info("Migration v11 completed successfully")
+
+        except Exception as e:
+            conn.rollback()
+            self.logger.error(f"Migration v11 failed: {e}")
             raise
         finally:
             conn.close()

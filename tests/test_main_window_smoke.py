@@ -30,9 +30,9 @@ def test_main_window_builds_entity_tabs(app):
                                              'quest', 'setting', 'module']
         npc_tree = window.entity_lists['npc']
         assert [npc_tree.headerItem().text(i) for i in range(npc_tree.columnCount())] == \
-            ['Name', 'Race', 'Faction', 'Created Date', 'Modified Date', 'Module']
-        assert window.entity_lists['faction'].columnCount() == 5
-        assert window.entity_lists['quest'].columnCount() == 4
+            ['Name', 'Race', 'Faction', 'Created Date', 'Modified Date', 'Module', 'Last seen']
+        assert window.entity_lists['faction'].columnCount() == 6
+        assert window.entity_lists['quest'].columnCount() == 5
         assert window.entity_lists['module'].columnCount() == 3   # a module has no parent module
         # rows are filled according to capabilities
         npc_item = window.entity_lists['npc'].topLevelItem(0)
@@ -80,7 +80,7 @@ def test_custom_types_rebuild_tabs_live(app):
         labels = [tab_widget.tabText(i) for i in range(tab_widget.count())]
         assert labels[0] == "Sessions" and labels[1] == "Monsters"
         assert list(window.entity_lists)[0] == "monster"
-        assert window.entity_lists['monster'].columnCount() == 4
+        assert window.entity_lists['monster'].columnCount() == 5
         # the selected tab survived the rebuild
         assert tab_widget.currentWidget() is window.entity_tabs['npc']
 
@@ -98,7 +98,7 @@ def test_custom_types_rebuild_tabs_live(app):
         editor2.apply()
         assert 'event' not in window.entity_lists
         assert window.tab_widget.tabText(window.tab_widget.indexOf(window.entity_tabs['npc'])) == 'People'
-        assert window.entity_lists['npc'].columnCount() == 6  # capabilities (not the label) drive columns
+        assert window.entity_lists['npc'].columnCount() == 7  # capabilities (not the label) drive columns
     finally:
         window.deleteLater()
 

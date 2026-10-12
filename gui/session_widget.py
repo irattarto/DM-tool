@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from gui.components.natural_item import NaturalSortItem
 from models.session import GameSession
 from models.document import Document
 from services.session_service import SessionService
@@ -35,6 +36,7 @@ class SessionWidget(QWidget):
         self.module_id = module_id
         self.sessions = []
         self.settings = settings
+        self.visible_filter = None   # optional callable(session_id) -> bool, set by the main window (module scope)
 
         self.logger = get_logger('session_widget')
 
@@ -155,7 +157,10 @@ class SessionWidget(QWidget):
                 if filter_text.lower() not in session.title.lower():
                     continue
 
-            item = QTreeWidgetItem()
+            if self.visible_filter is not None and not self.visible_filter(session.id):
+                continue
+
+            item = NaturalSortItem()  # "Session 2" sorts before "Session 10"
             item.setText(0, session.title or "Untitled")
             item.setText(1, session.session_date or "")
             item.setText(2, session.status or "planned")

@@ -14,7 +14,9 @@ from PyQt6.QtGui import (
     QTextListFormat, QDesktopServices
 )
 
+from gui.widgets.name_completer import NameCompleter
 from utils.local_files import local_audio_path
+from utils.name_matching import NameEntry
 from utils.logger import get_logger
 
 
@@ -53,6 +55,14 @@ class FormattedTextEdit(QTextEdit):
 
         # Context menu will be handled by contextMenuEvent override
         # (No need to set custom context menu policy)
+
+        # Tab completion of entry names (needs the database); the owner can switch it off or exclude its own entry
+        self.exclude_doc_id = None
+        self.create_entry_callback = None  # callable(kind, title) -> new document id, set by the owner window
+        self.name_priorities = None        # optional callable returning ids that come first (pinned entries)
+        self._name_cache = (0.0, [])
+        self.completer = NameCompleter(self, self._name_entries)
+        self.completer.enabled = bool(db_manager) and module_id is not None
 
         # Connect signals to update button states
         self.textChanged.connect(self._update_formatting_actions)
@@ -475,6 +485,45 @@ class FormattedTextEdit(QTextEdit):
             # Update the cursor position
             self.setTextCursor(cursor)
 
+    def _name_entries(self):
+        """The entries whose names can be completed (the campaign's, refreshed every few seconds)."""
+        import time
+        stamp, entries = self._name_cache
+        if time.monotonic() - stamp < 5.0 and entries:
+            return [e for e in entries if e.doc_id != self.exclude_doc_id]
+        if not self.db_manager or self.module_id is None:
+            return []
+        from config.entity_types import get_registry
+        try:
+            allowed = set(get_registry().keys_for('context')) - {'module'}
+            first = set(self.name_priorities()) if callable(self.name_priorities) else set()
+            entries = [NameEntry(d['title'], d['entity_type'], d['id'], 0 if d['id'] in first else 1)
+                       for d in self.db_manager.get_document_summaries(self.module_id)
+                       if d['entity_type'] in allowed and d['title']]
+        except Exception as e:
+            self.logger.warning(f"Could not read the names for completion: {e}")
+            entries = []
+        self._name_cache = (time.monotonic(), entries)
+        return [e for e in entries if e.doc_id != self.exclude_doc_id]
+
+    def forget_names(self):
+        """The set of entries changed: read the names again at the next key."""
+        self._name_cache = (0.0, [])
+
+    def keyPressEvent(self, event):
+        if self.completer.handle_key(event):
+            return
+        super().keyPressEvent(event)
+        self.completer.after_key(event)
+
+    def focusOutEvent(self, event):
+        self.completer.clear()
+        super().focusOutEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        self.completer.paint_ghost()
+
     def mousePressEvent(self, event):
         """Override mouse press to handle link clicks with Ctrl+Click."""
         from PyQt6.QtCore import Qt
@@ -555,6 +604,15 @@ class FormattedTextEdit(QTextEdit):
             insert_link_action = menu.addAction("Insert Link...")
             insert_link_action.triggered.connect(self._show_insert_link_dialog)
 
+        # Add "Create entry from selection" (the owner window provides how an entry is made)
+        if self.create_entry_callback is not None and self.textCursor().hasSelection():
+            from config.entity_types import get_registry
+            registry = get_registry()
+            create_menu = menu.addMenu("Create entry from selection")
+            for kind in registry.keys_for('create'):
+                if kind not in ('session', 'character'):
+                    create_menu.addAction(registry.label(kind), lambda k=kind: self._create_entry_from_selection(k))
+
         # Add "Send Selection to Discord" (needs a selection and a module context)
         if self.db_manager and self.module_id is not None and self.textCursor().hasSelection():
             discord_action = menu.addAction("Send Selection to Discord...")
@@ -566,6 +624,16 @@ class FormattedTextEdit(QTextEdit):
         paste_plain_action.triggered.connect(self.paste_without_formatting)
 
         menu.exec(event.globalPos())
+
+    def _create_entry_from_selection(self, kind: str):
+        """A new entry named like the selected text; the selection becomes a link to it."""
+        name = self.textCursor().selectedText().replace(' ', ' ').strip()
+        if not name or self.create_entry_callback is None:
+            return
+        doc_id = self.create_entry_callback(kind, name)
+        if doc_id:
+            self._insert_markdown_link(name, f"rpg://{kind}/{doc_id}")
+            self.forget_names()
 
     def _send_selection_to_discord(self):
         """Preview and send the selected text to Discord."""

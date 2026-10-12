@@ -76,6 +76,27 @@ Press **Ctrl+K** (or Edit > Search Everything...) and type to find any entry of 
 
 Click the star at the right of a row (or use "Pin for tonight" in the right-click menu or the preview) to pin an entry. Pinned entries stay in the **Tonight** strip at the bottom of the window on every page: click one to open it, or the × to unpin. Pins belong to the campaign.
 
+#### Adventure modules and the scope
+
+An entry can belong to **no module, one module or several**. Put it in modules with the **Modules** field of the editor, or select several rows in a list (Ctrl+click, Shift+click), right-click and choose **Add to module** (also **New module...**) or **Remove from module**. People can be given the same faction at once with **Set faction**.
+
+The **Scope** button in the top bar (next to the campaign) shows the whole campaign, or only the entries of the modules you tick, or those with **No module**. It applies to every list, the Sessions page, Home, the counts and Ctrl+K. Each list also has a **Module** box for that list only. Modules themselves are the entries of the **Modules** page.
+
+#### Links, suggestions and connections
+
+- While you type in an entry, grey text completes the name of another entry. **Tab** accepts it and turns it into a link, **Esc** ignores it; with several matches a small list opens (Up/Down, then Tab or Enter). Select text, right-click and choose **Create entry from selection** to make a new entry of that name and link it.
+- After you save, names that match no entry yet are offered as **new entries**; choose a type or Skip, or Never.
+- The **Connections** tab shows **Mentioned in** (everything that links to this entry) and, for a session, **Cast and places**. The **Last seen** column of a list is the latest session that mentions the entry.
+- **Map...** (editor) or right-click > **Relationship map...** draws what an entry is connected to; click a node to move around.
+- **History...** shows the earlier versions of an entry (each save keeps the last 20) and restores one.
+- Turn these helpers on or off in **Tools > Automation**.
+
+#### Quick capture and health check
+
+- **Ctrl+Space** opens a one-line box: what you type is added to the current session (the active one, else the latest) with the time, and the names in it are linked.
+- **Tools > Health Check** (and the cards on Home) lists people without a faction, entries without a picture, entries linked to nothing and possible duplicates (**Merge...** folds one into the other), and entries not mentioned in the last sessions.
+- When you close the program a **backup** of the campaign is written to the `auto_backups` folder next to the database (the last 7 are kept).
+
 ### Document Editing
 
 Documents support rich text formatting including:
@@ -190,7 +211,13 @@ A **campaign** is the top-level container you choose at startup. A **module** is
 2. The preview lists the module, its sessions, NPCs, factions, locations, items and events. Untick anything you do not want; options let you skip pictures or image prompts.
 3. Click **Import**. Everything is tagged with its module (Module column in the lists, badge and **Connections** tab in each document), NPCs are linked to their factions and to the sessions they appear in, and cross references in the text become clickable links.
 
-Importing the same file again updates the existing documents instead of duplicating them. Documents you edited yourself are shown as "edited here" and are left alone unless you tick them. How to write a module file the app can import: **Help > HTML Module Guide...** (F1), or the **Format guide...** button in the import window. The guide window can also save a copy of the guide and a ready-made example module. Importer reference for developers: `docs/html_module_format.md`.
+Importing the same file again updates the existing documents instead of duplicating them. Documents you edited yourself are shown as "edited here" and are left alone unless you tick them. How to write a module file the app can import: **Help > Guides...** (F1), or the **Format guide...** button in the import window. The guide window can also save a copy of the guide and a ready-made example module. Importer reference for developers: `docs/html_module_format.md`.
+
+## Importing Entity Files
+
+(To save entries as such a file, select rows in a list and use **File > Export Entities...** or right-click > **Export as entity file...**.)
+
+**File > Import Entities...** reads a Markdown, JSON or HTML file that holds only entries (NPCs, factions, locations, items, quests, events, sessions). The preview shows what is new, changed or unchanged and lets you choose where the entries go: the modules named in the file, one module, a new module, or none. Importing the same file again updates the entries; entries you edited in the program are left alone unless you tick them. The format, with an example file you can save, is in **Help > Guides**, tab "Entity file" (also `docs/entity_file_guide.md`).
 
 ## Module Management
 

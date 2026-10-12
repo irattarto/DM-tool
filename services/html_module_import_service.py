@@ -556,7 +556,7 @@ class HtmlModuleImportService:
                     meta['faction_id'] = faction[0]
                 final = self._rewrite_links(item.content, id_map, module_id)
                 meta['imported_final_hash'] = _hash(final)
-                self.db.update_document(doc_id, item.title, final, json.dumps(meta))
+                self.db.update_document(doc_id, item.title, final, json.dumps(meta), record_history=False)
             except Exception as e:
                 result.errors.append(f'{item.title} (links): {e}')
 
@@ -565,7 +565,7 @@ class HtmlModuleImportService:
                 current = self.db.get_document(module_id)
                 final = self._rewrite_links(module_item.content, id_map, module_id)
                 meta = {**self._meta(current), 'imported_final_hash': _hash(final)}
-                self.db.update_document(module_id, plan.module.title, final, json.dumps(meta))
+                self.db.update_document(module_id, plan.module.title, final, json.dumps(meta), record_history=False)
             except Exception as e:
                 result.errors.append(f'Module document (links): {e}')
 

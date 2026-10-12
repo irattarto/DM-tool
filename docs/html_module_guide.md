@@ -4,7 +4,7 @@ This guide explains how to write an adventure module as an HTML file that **RPG 
 
 The importer reads **element ids and a few class names**. Colours, fonts, scripts and layout are free, so the file can look however you like in a browser. A single `.html` file is enough. A module folder may also contain `images/`, `audio/` and a `module-export.json`.
 
-In the app: **Help > HTML Module Guide...** opens this guide. There you can also save this guide and a ready-made example module to any folder.
+In the app: **Help > Guides...** opens this guide. There you can also save this guide and a ready-made example module to any folder.
 
 ## 1. Quick start
 

@@ -15,6 +15,7 @@ Planned work, in rough priority order. Details live in `docs/`.
 - Not done from the UI redesign: helpful empty states (not wanted for now); a Home agenda, scratch notes and quest status (they would need new stored fields).
 
 ## Done recently
+Adventure modules as filters (scope selector, bulk actions), entity file import (Markdown/JSON/HTML), Tab completion of names, mentions and cast lists, last seen, new names, health check and merge, quick capture, relationship map, entry history (schema v11) and automatic backups.
 UI redesign: sidebar, Home page, campaign switcher, Ctrl+K search, picture lists with sort/group and preview,
 pinned "Tonight" tray, Delete with Undo, redesigned editor window.
 Security hardening, schema v8 with custom entity types, one theme system with live dark/light,

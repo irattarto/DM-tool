@@ -9,13 +9,14 @@ from typing import Dict, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QTreeWidget, QTreeWidgetItem,
-    QMenu, QComboBox, QSplitter, QToolButton,
+    QMenu, QComboBox, QSplitter, QToolButton, QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QItemSelectionModel, Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 
 from config.entity_types import get_registry, CAP_FACTION_LINK, CAP_RACE_COLUMN
 from models.document import Document
+from utils.natural_sort import natural_key
 from utils.ui_helpers import show_error, show_warning, show_info, show_question
 from utils.entity_metadata_extractor import extract_npc_metadata, extract_faction_metadata, format_date
 from gui.components.entity_list import (
@@ -102,21 +103,9 @@ class EntityTabsMixin:
         if entity_type != 'module':
             # appended last so saved sort/width preferences (by column index) keep working
             labels, widths = labels + ['Module'], widths + [150]
+        if entity_type not in ('module', 'session'):
+            labels, widths = labels + ['Last seen'], widths + [120]   # the latest session that mentions the entry
         return labels, widths
-
-    def _module_title_for(self, doc: dict) -> str:
-        """Title of the adventure module an entity was imported from, or ''."""
-        try:
-            module_doc_id = json.loads(doc['metadata']).get('module_doc_id') if doc.get('metadata') else None
-        except (TypeError, ValueError, AttributeError):
-            return ''
-        if module_doc_id is None:
-            return ''
-        cache = self.__dict__.setdefault('_module_title_cache', {})
-        if module_doc_id not in cache:
-            module_doc = self.db.get_document(module_doc_id)
-            cache[module_doc_id] = module_doc['title'] if module_doc else ''
-        return cache[module_doc_id]
 
     def _fill_entity_row(self, item: QTreeWidgetItem, doc: dict, entity_type: str,
                          valid_faction_names: set) -> None:
@@ -153,10 +142,12 @@ class EntityTabsMixin:
             values = [race_text, created_date, modified_date]
         else:
             values = [created_date, modified_date]
-        module_title = ''
+        module_title = seen = ''
         if entity_type != 'module':
-            module_title = self._module_title_for(doc)
+            module_title = self._module_titles_for(doc['id'])
             values.append(module_title)
+            seen = self._last_seen_text(doc['id'])
+            values.append(seen)
 
         for column, value in enumerate(values, start=1):
             item.setText(column, value)
@@ -169,6 +160,7 @@ class EntityTabsMixin:
         else:
             hue = name_hue(doc.get('title', ''))
         item.setData(0, ROLE_ROW, {'race': race_text, 'faction': faction_text, 'module': module_title,
+                                   'last_seen': seen if entity_type != 'module' else '',
                                    'hue': hue, 'image': None, 'is_group': False})
 
     # Delete lives in the right-click menu and on the Delete key (always with a confirmation, then Undo).
@@ -196,6 +188,7 @@ class EntityTabsMixin:
         filter_layout.addWidget(search_edit)
 
         toolbar_layout.addLayout(filter_layout)
+        self._add_module_filter(toolbar_layout, entity_type)   # "Module:" box (see gui/module_scope.py)
 
         # Post name + primary picture cards to Discord (kept on the left, away from Delete)
         from gui.discord_actions import DISCORD_ENTITY_TYPES
@@ -289,6 +282,7 @@ class EntityTabsMixin:
             doc_tree.setColumnHidden(column, True)
         doc_tree.setSortingEnabled(False)  # ordered in code, see _populate_entity_list
         doc_tree.setUniformRowHeights(False)
+        doc_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # several rows for bulk actions
         doc_tree.setMouseTracking(True)
         doc_tree.setItemDelegateForColumn(0, EntityRowDelegate(self.entity_thumbs, doc_tree))
 
@@ -306,7 +300,7 @@ class EntityTabsMixin:
         delete_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
         delete_shortcut.activated.connect(lambda et=entity_type: self._on_delete_entity_document(et))
 
-        if entity_type in DISCORD_ENTITY_TYPES or self.ENTITY_MENU_HAS_DELETE:
+        if True:   # every list has a menu (bulk module and faction actions)
             doc_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             doc_tree.customContextMenuRequested.connect(
                 lambda pos, et=entity_type: self._on_entity_context_menu(et, pos))
@@ -348,6 +342,8 @@ class EntityTabsMixin:
             # Entries still in the undo window belong to the campaign that was open: delete them now
             if any(data.get('module_id') != self.current_module_id for _type, data in self._pending_deletes.values()):
                 self._flush_pending_deletes()
+            self._invalidate_link_graph()
+            self._reload_module_links()   # before the lists: their rows show the modules
             self._load_pins()  # before the lists, so their rows know which entries are pinned
             # Load documents for each entity type (the sidebar counts are refreshed once, at the end)
             self._suspend_sidebar_counts = True
@@ -371,7 +367,6 @@ class EntityTabsMixin:
 
         try:
             self.logger.debug(f"Loading {entity_type} documents for campaign {self.current_module_id}")
-            self._module_title_cache = {}
             documents = self.db.get_documents(self.current_module_id, entity_type)
             self.logger.debug(f"Loaded {len(documents)} {entity_type} documents")
 
@@ -394,7 +389,8 @@ class EntityTabsMixin:
             return
         doc_tree = self.entity_lists[entity_type]
         documents, valid_faction_names = self.entity_view_documents.get(entity_type, ([], set()))
-        documents = [doc for doc in documents if doc['id'] not in self._pending_deletes]
+        documents = [doc for doc in documents if doc['id'] not in self._pending_deletes
+                     and self._visible_in_list(entity_type, doc['id'])]
 
         # Keep the selection and scroll position across the rebuild
         selected_doc_id = None
@@ -428,7 +424,7 @@ class EntityTabsMixin:
             for item in items:
                 groups.setdefault(item.data(0, ROLE_ROW).get(group_by) or '', []).append(item)
             none_label = f"No {group_by}"
-            names = sorted((name for name in groups if name), key=str.casefold)
+            names = sorted((name for name in groups if name), key=natural_key)
             if '' in groups:
                 names.append('')  # entries without a value come last
             for name in names:
@@ -459,21 +455,27 @@ class EntityTabsMixin:
         column, order = self.entity_sort_state.get(entity_type, (0, Qt.SortOrder.AscendingOrder))
         label = labels[column] if column < len(labels) else 'Name'
 
-        def title(item):
-            return item.data(0, ROLE_DOC).get('title', '').casefold()
+        by_date = label in ('Created Date', 'Modified Date')
 
-        def value(item):
+        def title(item):
+            return natural_key(item.data(0, ROLE_DOC).get('title', ''))
+
+        def raw(item):
             doc = item.data(0, ROLE_DOC)
             if label == 'Name':
-                return title(item)
+                return doc.get('title', '')
             if label == 'Created Date':
                 return doc.get('created_date') or ''
             if label == 'Modified Date':
                 return doc.get('modified_date') or ''
-            return item.text(column).casefold()
+            return item.text(column)
 
-        filled = [item for item in items if value(item) != '']
-        empty = sorted((item for item in items if value(item) == ''), key=title)
+        def value(item):
+            # dates are ISO text and sort as they are; names and other text sort with numbers by value (2 before 10)
+            return raw(item) if by_date else natural_key(raw(item))
+
+        filled = [item for item in items if raw(item) != '']
+        empty = sorted((item for item in items if raw(item) == ''), key=title)
         filled.sort(key=lambda item: (value(item), title(item)), reverse=order == Qt.SortOrder.DescendingOrder)
         return filled + empty
 
@@ -563,6 +565,8 @@ class EntityTabsMixin:
             rows.append(("Faction", faction, name_color(name_hue(faction), dark) if faction else None))
         if entity_type != 'module':
             rows.append(("Module", info.get('module', ''), None))
+        if info.get('last_seen'):
+            rows.append(("Last seen", self._last_seen_detail(document['id']), None))
         for column_label, caption in (('Created Date', 'Created'), ('Modified Date', 'Modified')):
             if column_label in labels:
                 rows.append((caption, item.text(labels.index(column_label)), None))
@@ -592,25 +596,37 @@ class EntityTabsMixin:
         item = doc_tree.itemAt(pos)
         if item is None or not item.data(0, ROLE_DOC):
             return
-        doc_tree.setCurrentItem(item)
+        if not item.isSelected():
+            doc_tree.setCurrentItem(item)     # a right-click outside the selection selects that row alone
+        else:
+            doc_tree.setCurrentItem(item, 0, QItemSelectionModel.SelectionFlag.NoUpdate)   # keep the selection
         document = item.data(0, ROLE_DOC) or {}
+        selected = self._selected_entity_documents(entity_type) or [document]
         menu = QMenu(self)
         open_action = menu.addAction("Open")
         pin_action = menu.addAction("Unpin" if self._is_pinned(document.get('id')) else "Pin for tonight")
         discord_action = menu.addAction("Send to Discord...") if entity_type in DISCORD_ENTITY_TYPES else None
+        map_action = menu.addAction("Relationship map...") if len(selected) == 1 else None
+        menu.addSeparator()
+        bulk = self._add_bulk_menu_actions(menu, entity_type, selected) if entity_type != 'module' else {}
         delete_action = None
-        if self.ENTITY_MENU_HAS_DELETE:
+        if self.ENTITY_MENU_HAS_DELETE and len(selected) == 1:
             menu.addSeparator()
             delete_action = menu.addAction("Delete")
         chosen = menu.exec(doc_tree.viewport().mapToGlobal(pos))
         if chosen is None:
             return
-        if chosen is open_action:
+        if chosen in bulk:
+            bulk[chosen]()
+        elif chosen is open_action:
             self._on_entity_tree_item_selected(item, entity_type)
+        elif map_action is not None and chosen is map_action:
+            self._show_relationship_map(document['id'])
         elif chosen is pin_action:
             self._toggle_pin(document['id'])
         elif chosen is discord_action:
-            self._on_send_entities_to_discord(entity_type, [document['id']] if document.get('id') else ())
+            ids = [d['id'] for d in selected if d.get('id')]
+            self._on_send_entities_to_discord(entity_type, ids)
         elif chosen is delete_action:
             self._on_delete_entity_document(entity_type)
 
@@ -651,7 +667,6 @@ class EntityTabsMixin:
                 return
 
             # Get all documents for this entity type
-            self._module_title_cache = {}
             documents = self.db.get_documents(self.current_module_id, entity_type)
 
             # For NPCs, get valid faction names for validation
@@ -830,6 +845,8 @@ class EntityTabsMixin:
 
     def _on_document_saved(self, entity_type: str):
         """An editor window saved an entry: refresh what shows it (its list, the tray, Home, linked lists)."""
+        self._invalidate_link_graph()
+        self._reload_module_links()   # the editor may have changed the modules
         search = self.entity_search_widgets.get(entity_type)
         text = search.text() if search is not None else ''
         if text.strip():
@@ -837,6 +854,10 @@ class EntityTabsMixin:
         else:
             self._load_entity_documents(entity_type)
         registry = get_registry()
+        if entity_type == 'module':
+            for other in self.entity_types:   # module names show in every list
+                if other != entity_type:
+                    self._load_entity_documents(other)
         if entity_type == 'faction':
             # NPC rows show the faction's name, so they follow a rename
             for other in self.entity_types:

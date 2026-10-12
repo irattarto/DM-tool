@@ -38,10 +38,12 @@ from gui.components.undo_toast import UndoToast
 from gui.components.home_page import HomePage
 from gui.entity_tabs import EntityTabsMixin
 from gui.home_and_pins import HomeAndPinsMixin
+from gui.module_scope import ModuleScopeMixin
+from gui.automation import AutomationMixin
 from gui.shell import ShellMixin
 
 
-class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
+class MainWindow(AutomationMixin, ModuleScopeMixin, HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
     """
     Main window for the RPG Database Manager application.
     """
@@ -79,6 +81,8 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
 
         self._init_entity_state()
         self._init_pins()
+        self._init_module_scope()
+        self._init_automation()
 
         # Setup UI
         self._setup_window()
@@ -169,6 +173,18 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
         self.import_html_module_action.triggered.connect(self._on_import_html_module)
         file_menu.addAction(self.import_html_module_action)
 
+        self.import_entities_action = QAction("Import &Entities...", self)
+        self.import_entities_action.setStatusTip(
+            "Import NPCs, locations, items and more from a Markdown, JSON or HTML file, and attach them to modules")
+        self.import_entities_action.triggered.connect(self._on_import_entities)
+        file_menu.addAction(self.import_entities_action)
+
+        self.export_entities_action = QAction("E&xport Entities...", self)
+        self.export_entities_action.setStatusTip(
+            "Save the selected rows of the open list (or the whole list) as an entity file other programs or campaigns can import")
+        self.export_entities_action.triggered.connect(self._on_export_entities)
+        file_menu.addAction(self.export_entities_action)
+
         file_menu.addSeparator()
 
         database_action = QAction("&Database", self)
@@ -212,13 +228,18 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
         name_generator_action.setStatusTip("Generate character/entity names from embedded name lists")
         name_generator_action.triggered.connect(self._on_name_generator)
         tools_menu.addAction(name_generator_action)
+        health_action = QAction("&Health Check...", self)
+        health_action.setStatusTip("Entries without a faction or picture, entries linked to nothing, possible duplicates")
+        health_action.triggered.connect(self._on_health_check)
+        tools_menu.addAction(health_action)
+        self._create_automation_menu(tools_menu)
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
-        guide_action = QAction("&HTML Module Guide...", self)
+        guide_action = QAction("&Guides (HTML module, entity file)...", self)
         guide_action.setShortcut("F1")
-        guide_action.setStatusTip("How to write an HTML module the app can import")
+        guide_action.setStatusTip("How to write an HTML module or an entity file the app can import")
         guide_action.triggered.connect(self._on_html_module_guide)
         help_menu.addAction(guide_action)
 
@@ -282,6 +303,7 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
         self.home_tab = HomePage(self.entity_thumbs)
         self.home_tab.go_to.connect(self._on_sidebar_selected)
         self.home_tab.open_entry.connect(self._open_palette_entry)
+        self.home_tab.health_requested.connect(self._on_health_check)
         self.tab_widget.addTab(self.home_tab, "Home")
         self._rebuild_sidebar()
 
@@ -295,6 +317,7 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
         self.undo_toast = UndoToast(self)
         self.undo_toast.undo_clicked.connect(self._undo_pending_delete)
         QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo_pending_delete)
+        QShortcut(QKeySequence("Ctrl+Space"), self, activated=self._on_quick_capture)
 
 
 
@@ -312,6 +335,7 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
         from gui.session_widget import SessionWidget
         module_id = self.current_module_id if self.current_module_id is not None else 1
         self.session_widget = SessionWidget(self.session_service, module_id, self.template_service, self.settings)
+        self.session_widget.visible_filter = lambda session_id: self._in_scope(session_id, 'session')
         self.session_widget.session_created.connect(self._on_session_created)
         self.session_widget.session_selected.connect(self._on_session_document_selected)
         layout.addWidget(self.session_widget)
@@ -807,6 +831,49 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
             self.logger.error(f"Error importing HTML module: {e}", exc_info=True)
             show_error(self, "Error", f"Failed to import campaign: {e}")
 
+    def _on_import_entities(self):
+        """Import an entity file (Markdown, JSON or HTML cards) into the current campaign (preview first)."""
+        self._flush_pending_deletes()
+        if not self.current_module_id:
+            show_warning(self, "No Campaign", "Select or create a campaign before importing entities.")
+            return
+        try:
+            from gui.dialogs.entity_file_import_dialog import EntityFileImportDialog
+            from services.entity_file_service import EntityFileService, read_entity_file
+
+            start_dir = self.settings.get_custom_setting("last_entity_file_dir", "") or ""
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Import Entities", start_dir,
+                "Entity files (*.md *.markdown *.txt *.json *.html *.htm);;All files (*)")
+            if not path:
+                return
+            self.settings.set_custom_setting("last_entity_file_dir", str(Path(path).parent))
+            parsed = read_entity_file(path)
+            if not parsed.entries:
+                show_warning(self, "Nothing to import",
+                             "No entries were found in this file.\n\nSee Help > Guides, tab 'Entity file', "
+                             "for the format.\n\n" + "\n".join(parsed.warnings[:5]))
+                return
+            campaign = self.db.get_module(self.current_module_id) or {}
+            service = EntityFileService(self.db, self.image_service)
+            plan = service.build_plan(parsed, self.current_module_id)
+            dialog = EntityFileImportDialog(service, plan, campaign.get('name', ''), dict(self._module_titles), self)
+            if dialog.exec() != QDialog.DialogCode.Accepted or dialog.import_result is None:
+                return
+            result = dialog.import_result
+            self._load_documents()
+            if hasattr(self, 'session_widget'):
+                self.session_widget.refresh_data()
+            message = (f"Created {result.created}, updated {result.updated}, linked {result.links}, "
+                       f"module links {result.module_links}, pictures {result.images}.")
+            if result.errors:
+                show_warning(self, "Import finished with problems", message + "\n\n" + "\n".join(result.errors[:10]))
+            else:
+                show_info(self, "Import complete", message)
+        except Exception as e:
+            self.logger.error(f"Error importing entities: {e}", exc_info=True)
+            show_error(self, "Error", f"Failed to import entities: {e}")
+
     def _on_module_changed(self):
         """Handle campaign changes from Campaign Manager."""
         try:
@@ -1265,6 +1332,7 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
             return
 
         self._flush_pending_deletes()  # a delete still in its undo window is carried out now
+        self._auto_backup_on_close()
 
         # Clean up session widget to prevent Qt object lifecycle issues
         if hasattr(self, 'session_widget') and self.session_widget is not None:

@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.theme import set_props
+from utils.natural_sort import natural_key
 
 
 @dataclass
@@ -33,7 +34,7 @@ class DiscordEntityPickerDialog(QDialog):
         self.setModal(True)
         self.resize(480, 560)
         preselected = set(preselected_ids)
-        self._choices = sorted(choices, key=lambda c: (c.name.casefold(), c.id))
+        self._choices = sorted(choices, key=lambda c: (natural_key(c.name), c.id))
         self._setup_ui(preselected)
         self._update_summary()
 

@@ -1,0 +1,17 @@
+{
+  "format": "dm-entities",
+  "pack": "raton-pass-example",
+  "modules": ["Raton Pass"],
+  "entities": [
+    {"type": "faction", "id": "f-guild", "title": "Iron Guild",
+     "content": "A guild of dockworkers and smugglers that runs the harbour."},
+    {"type": "npc", "id": "c-boss", "title": "Big Boss", "race": "Human", "faction": "Iron Guild",
+     "tags": ["Human", "Strong"], "modules": ["Raton Pass", "Docks of Despair"],
+     "content": "Runs the guild from [the yard](#l-yard)."},
+    {"type": "location", "id": "l-yard", "title": "The Yard",
+     "content": "A dusty yard behind the warehouse. [Big Boss](#c-boss) holds court here."},
+    {"type": "session", "id": "s-1", "title": "Arrival", "date": "2026-10-12", "status": "planned",
+     "participants": ["Ana", "Ben"],
+     "content": "The party arrives at [the yard](#l-yard) and meets [Big Boss](#c-boss)."}
+  ]
+}

@@ -477,7 +477,9 @@ def test_release_workflow_can_publish_a_marked_prerelease_from_main():
 def test_app_version_is_a_valid_release_version():
     import re
     from config.version import __version__, __version_info__
-    assert re.fullmatch(r"\d+\.\d+\.\d+", __version__) and tuple(int(x) for x in __version__.split(".")) == __version_info__
+    # 1.2.3, or a pre-release such as 1.2.3-beta.1
+    assert re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?", __version__)
+    assert tuple(int(x) for x in __version__.split("-")[0].split(".")) == __version_info__
 
 
 def test_code_base_has_no_pyflakes_warnings():
@@ -502,7 +504,7 @@ def test_readme_badge_matches_version():
     from pathlib import Path
     from config.version import __version__
     readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
-    assert f"badge/version-{__version__}-" in readme
+    assert f"badge/version-{__version__.replace('-', '--')}-" in readme       # shields.io writes a dash as two
 
 
 def test_no_gui_module_imports_the_legacy_styles_module():

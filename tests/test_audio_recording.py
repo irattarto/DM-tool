@@ -6,7 +6,7 @@ import types
 import pytest
 
 pytest.importorskip("PyQt6")
-from PyQt6.QtCore import QCoreApplication
+from PyQt6.QtWidgets import QApplication
 
 from utils import audio_recording as ar
 from utils.audio_recording import AudioRecordingThread, friendly_microphone_error, microphone_support_status
@@ -16,7 +16,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 @pytest.fixture(scope="module")
 def app():
-    return QCoreApplication.instance() or QCoreApplication([])
+    # a QApplication, not a QCoreApplication: a bare core application left behind would crash the first widget test after it
+    return QApplication.instance() or QApplication([])
 
 
 @pytest.mark.parametrize("error, expected", [

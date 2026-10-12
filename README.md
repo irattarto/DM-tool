@@ -2,7 +2,7 @@
 
 A comprehensive desktop application for managing tabletop RPG campaigns with a flexible document-centric approach.
 
-![Version](https://img.shields.io/badge/version-1.8.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.0--beta.1-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)
@@ -136,6 +136,10 @@ Download the pre-built executable for your platform from the releases page (if a
 - **Pinned tray "Tonight"**: pin the NPCs, places and items for the next session and open them from any page
 - **Campaign switcher**: the open campaign is always visible at the top; switch with one click
 - **Delete with Undo**: a deleted entry can be brought back for 10 seconds (Ctrl+Z)
+- **Adventure modules**: an entry belongs to no module, one or several; the **Scope** button filters everything at once, and selected rows can be added to a module or given a faction together
+- **Entity files**: File > Import Entities... brings NPCs, locations, items, sessions... from a Markdown, JSON or HTML file into the campaign and its modules
+- **Connected entries**: Tab completes names into links while you type, entries show where they are mentioned, sessions list their cast and places, lists show when an entry was last seen
+- **Less typing while playing**: quick capture (Ctrl+Space), new names found in your notes, health check, relationship map, entry history and an automatic backup on close
 
 ### UI & Customization
 
@@ -191,13 +195,24 @@ Find anything with Ctrl+K, and pin the entries you need for tonight's session wi
    - **Automatic factions** (off by default): NPCs without a faction join an automatic "Unaffiliated" faction and monsters a "Monsters" faction (named "Függetlenek" / "Szörnyek" in Hungarian modules). They are real faction documents you can rename or delete.
 4. Click "Import"
 
-Re-importing the same file updates changed documents and skips unchanged ones; documents you edited in the app are only overwritten when you tick them. How to write such a file: **Help > HTML Module Guide...** in the app, or the [HTML Module Guide](docs/html_module_guide.md). Importer details for developers: [docs/html_module_format.md](docs/html_module_format.md).
+Re-importing the same file updates changed documents and skips unchanged ones; documents you edited in the app are only overwritten when you tick them. How to write such a file: **Help > Guides...** in the app, or the [HTML Module Guide](docs/html_module_guide.md). Importer details for developers: [docs/html_module_format.md](docs/html_module_format.md).
+
+### Importing an entity file
+
+1. File > Import Entities...
+2. Pick a `.md`, `.json` or `.html` file
+3. Review the preview and choose where the entries go (the modules named in the file, one module, a new module, or none)
+4. Click "Import"
+
+To save entries as such a file, select rows in a list and use File > Export Entities... (or right-click > Export as entity file...).
+
+The format and a ready-made example are in **Help > Guides**, tab "Entity file", or [docs/entity_file_guide.md](docs/entity_file_guide.md).
 
 ## HTML Module Creation Manual
 
 The rules for writing an HTML module that the app can import (page skeleton, id prefixes, cards, links, factions, scenes, pictures, audio and maps, the JSON alternative, what the import warnings mean, and a checklist) are in **[docs/html_module_guide.md](docs/html_module_guide.md)**.
 
-In the app it is under **Help > HTML Module Guide...** (F1), and the **Format guide...** button of the Import HTML Module dialog opens it too. The window can save a copy of the guide and a ready-made example module (`tools/html_module/module_template.html`) to any folder. Both files are part of the installation.
+In the app it is under **Help > Guides...** (F1), and the **Format guide...** button of the Import HTML Module dialog opens it too. The window can save a copy of the guide and a ready-made example module (`tools/html_module/module_template.html`) to any folder. Both files are part of the installation.
 
 The importer reference for developers is [docs/html_module_format.md](docs/html_module_format.md). The complete generation rules and the pipeline scripts live in the separate **module-creator** project.
 
@@ -268,7 +283,8 @@ mypy .
 ## Documentation
 
 - [User Guide](docs/user_guide.md) - Comprehensive guide for using the application
-- [HTML Module Guide](docs/html_module_guide.md) - How to write an HTML module the app can import (also in the app: Help > HTML Module Guide)
+- [HTML Module Guide](docs/html_module_guide.md) - How to write an HTML module the app can import (also in the app: Help > Guides)
+- [Entity File Guide](docs/entity_file_guide.md) - How to write a Markdown, JSON or HTML file with NPCs, locations, sessions... for File > Import Entities (also in the app: Help > Guides)
 - [HTML Module Format](docs/html_module_format.md) - What the HTML module importer recognises (reference for developers)
 - [Quick Style Reference](QUICK_STYLE_REFERENCE.md) - Design system and styling guide
 
