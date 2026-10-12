@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.9.0-beta.1] - 2026-10-12
+## [1.9.0] - 2026-10-12 (pre-release 1.9.0-beta.1)
 
 Pre-release: adventure modules as filters, entity files (import and export), Tab completion and the other helpers below. The database schema is now v11.
 
