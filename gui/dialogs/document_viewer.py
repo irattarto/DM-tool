@@ -8,7 +8,7 @@ from config.entity_types import get_registry, CAP_SESSION, CAP_FACTION_LINK, CAP
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTabWidget,
-    QComboBox, QDateEdit, QFormLayout, QGroupBox, QMessageBox
+    QComboBox, QDateEdit, QFormLayout, QGroupBox, QMessageBox, QFrame
 )
 from PyQt6.QtCore import QTimer, QDate, Qt
 
@@ -41,7 +41,7 @@ class DocumentViewerWindow(QMainWindow):
         self.main_window = self._find_main_window(parent)
 
         self.setWindowTitle(f"{get_registry().label(document.entity_type)}: {document.title}")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(900, 620)
         self._updating_display = False
         self._is_dirty = False  # Track if document has unsaved changes
 
@@ -57,6 +57,18 @@ class DocumentViewerWindow(QMainWindow):
 
         self._setup_ui()
         self._display_document()
+
+    @property
+    def _is_dirty(self) -> bool:
+        """True while there are unsaved changes; the header shows a marker for it."""
+        return self._dirty_flag
+
+    @_is_dirty.setter
+    def _is_dirty(self, value: bool):
+        self._dirty_flag = bool(value)
+        label = getattr(self, 'unsaved_label', None)
+        if label is not None:
+            label.setVisible(self._dirty_flag)
 
     def _find_main_window(self, widget):
         """
@@ -162,35 +174,42 @@ class DocumentViewerWindow(QMainWindow):
             set_props(self.module_badge, role="accent")
             header_layout.addWidget(self.module_badge)
         header_layout.addStretch()
+        self.unsaved_label = QLabel("● Unsaved changes")
+        set_props(self.unsaved_label, role="accent")
+        self.unsaved_label.setVisible(False)
+        header_layout.addWidget(self.unsaved_label)
         layout.addLayout(header_layout)
 
-        # Create tab widget
-        self.tab_widget = QTabWidget()
-        layout.addWidget(self.tab_widget, 1)  # Stretch to fill space
+        # Left: the picture and the main fields. Right: the tabs (Description, Images, ...).
+        body_layout = QHBoxLayout()
+        layout.addLayout(body_layout, 1)  # Stretch to fill space
 
-        # Tab 1: Details (title and content)
-        details_tab = QWidget()
-        details_layout = QVBoxLayout(details_tab)
+        info_panel = QFrame()
+        info_panel.setObjectName("editorInfo")
+        info_panel.setFixedWidth(250)
+        info_panel.setStyleSheet("#editorInfo { background: palette(alternate-base); "
+                                 "border: 1px solid palette(mid); border-radius: 6px; }")
+        info_layout = QVBoxLayout(info_panel)
+        info_layout.setContentsMargins(12, 12, 12, 12)
+        info_layout.setSpacing(6)
+        body_layout.addWidget(info_panel)
 
-        # Title editor with primary image
-        title_layout = QHBoxLayout()
-
-        # Primary image thumbnail (50x50px) on the left
+        # Primary image (click to enlarge, right-click for options)
         self.primary_image_widget = PrimaryImageWidget(
             document_id=self.document.id,
             document_title=self.document.title,
             db_manager=self.db,
-            parent=self
+            parent=self,
+            size=224
         )
         self.primary_image_widget.go_to_images_tab.connect(self._go_to_images_tab)
-        title_layout.addWidget(self.primary_image_widget)
+        info_layout.addWidget(self.primary_image_widget, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # Title field
-        title_layout.addWidget(QLabel("Title:"))
+        info_layout.addWidget(QLabel("Title"))
         self.title_edit = QLineEdit()
         self.title_edit.textChanged.connect(self._on_title_changed)
-        title_layout.addWidget(self.title_edit)
-        details_layout.addLayout(title_layout)
+        info_layout.addWidget(self.title_edit)
 
         # Session-specific fields (if entity type is session)
         if get_registry().has_capability(self.document.entity_type, CAP_SESSION):
@@ -216,7 +235,34 @@ class DocumentViewerWindow(QMainWindow):
             self.session_participants_edit.textChanged.connect(self._on_session_field_changed)
             session_details_layout.addRow("Participants:", self.session_participants_edit)
 
-            details_layout.addWidget(session_details_group)
+            info_layout.addWidget(session_details_group)
+
+        # Faction (people only; sessions have none). It used to sit on a separate Metadata tab.
+        elif get_registry().has_capability(self.document.entity_type, CAP_FACTION_LINK):
+            info_layout.addWidget(QLabel("Faction"))
+            self.faction_combo = QComboBox()
+            self.faction_combo.addItem("(None)", None)  # Default empty option
+
+            # Populate with factions from current module
+            try:
+                factions = self.db.get_documents(self.document.module_id, 'faction')
+                for faction in factions:
+                    self.faction_combo.addItem(faction['title'], faction['id'])
+                self.logger.debug(f"Loaded {len(factions)} factions for NPC metadata selector")
+            except Exception as e:
+                self.logger.error(f"Failed to load factions for metadata tab: {e}")
+
+            info_layout.addWidget(self.faction_combo)
+
+        info_layout.addStretch(1)
+
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        body_layout.addWidget(self.tab_widget, 1)
+
+        # Tab 1: Description (the text)
+        details_tab = QWidget()
+        details_layout = QVBoxLayout(details_tab)
 
         # Content editor with formatting toolbar
         # Pass db_manager and module_id for link insertion dialog
@@ -241,7 +287,7 @@ class DocumentViewerWindow(QMainWindow):
         details_layout.addWidget(self.content_edit)
 
 
-        self.tab_widget.addTab(details_tab, "Details")
+        self.tab_widget.addTab(details_tab, "Description")
 
         # Tab 2: Images
         images_tab = QWidget()
@@ -264,41 +310,6 @@ class DocumentViewerWindow(QMainWindow):
         connections_tab = self._build_connections_tab()
         if connections_tab is not None:
             self.tab_widget.addTab(connections_tab, "Connections")
-
-        # For sessions, only show Details and Images tabs (skip Metadata, Abilities, Inventory)
-        if get_registry().has_capability(self.document.entity_type, CAP_SESSION):
-            # Sessions don't need Metadata, Abilities, or Inventory tabs
-            pass
-        # Tab 3: Metadata (only for NPCs currently)
-        elif get_registry().has_capability(self.document.entity_type, CAP_FACTION_LINK):
-            metadata_tab = QWidget()
-            metadata_layout = QVBoxLayout(metadata_tab)
-
-            # Faction selection
-            faction_group_layout = QHBoxLayout()
-            faction_group_layout.addWidget(QLabel("Faction:"))
-
-            self.faction_combo = QComboBox()
-            self.faction_combo.addItem("(None)", None)  # Default empty option
-
-            # Populate with factions from current module
-            try:
-                factions = self.db.get_documents(self.document.module_id, 'faction')
-                for faction in factions:
-                    self.faction_combo.addItem(faction['title'], faction['id'])
-                self.logger.debug(f"Loaded {len(factions)} factions for NPC metadata selector")
-            except Exception as e:
-                self.logger.error(f"Failed to load factions for metadata tab: {e}")
-
-            faction_group_layout.addWidget(self.faction_combo)
-            faction_group_layout.addStretch()
-
-            metadata_layout.addLayout(faction_group_layout)
-
-            # Add space for future metadata fields (race, class, etc.)
-            metadata_layout.addStretch()
-
-            self.tab_widget.addTab(metadata_tab, "Metadata")
 
         # Tab 4: Abilities (for characters and NPCs, but not sessions) - Multi-item management
         if get_registry().has_capability(self.document.entity_type, CAP_ABILITIES):

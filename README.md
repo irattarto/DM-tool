@@ -2,7 +2,7 @@
 
 A comprehensive desktop application for managing tabletop RPG campaigns with a flexible document-centric approach.
 
-![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)
@@ -90,11 +90,10 @@ Download the pre-built executable for your platform from the releases page (if a
    - Click "Create Module"
 
 3. **Create Your First Document**
-   - Go to the Documents tab
-   - Click "New Document"
-   - Select an entity type (NPC, Location, Quest, etc.)
-   - Fill in the template
-   - Click "Create Document"
+   - Open an entity list in the sidebar (NPCs, Locations, Quests, etc.)
+   - Click "New" and choose "From template"
+   - Enter a name and fill in the template
+   - Click "Save"
 
 
 ## Features
@@ -129,6 +128,15 @@ Download the pre-built executable for your platform from the releases page (if a
 - **Backup & Restore**: Create backups of your campaign data
 - **Module Selection**: Easily switch between different campaigns
 
+### Navigation & Daily Use
+
+- **Sidebar and Home page**: jump between Home, Sessions, every entity type and Templates; Home shows what is in the campaign (counts, latest edits, factions, sessions)
+- **Picture lists**: every entity list shows the primary picture, race, faction (in its own colour) and module, with sorting, grouping and a preview panel
+- **Search everything (Ctrl+K)**: find any entry or run an action from one box
+- **Pinned tray "Tonight"**: pin the NPCs, places and items for the next session and open them from any page
+- **Campaign switcher**: the open campaign is always visible at the top; switch with one click
+- **Delete with Undo**: a deleted entry can be brought back for 10 seconds (Ctrl+Z)
+
 ### UI & Customization
 
 - **Modern Design System**: Consistent styling with semantic colors
@@ -141,16 +149,17 @@ Download the pre-built executable for your platform from the releases page (if a
 
 ### Creating Documents
 
-1. Click "New Document" in the Documents tab
-2. Select entity type (NPC, Location, Quest, etc.)
-3. Choose a template or use default
-4. Fill in the template fields
-5. Add rich text formatting as needed
-6. Save and approve when ready
+1. Open an entity list in the sidebar (NPCs, Locations, Quests, etc.)
+2. Click "New" and choose "From template" (Ctrl+N) or "Blank document" (Ctrl+Shift+N)
+3. Enter a name; the editor opens
+4. Fill in the template fields and add rich text formatting as needed
+5. Save when ready
+
+Find anything with Ctrl+K, and pin the entries you need for tonight's session with the star on a row.
 
 ### Managing Sessions
 
-1. Go to the Game Sessions tab
+1. Open Sessions in the sidebar
 2. Click "New Session"
 3. Enter session details (title, date, participants)
 4. Record session content (text or voice)

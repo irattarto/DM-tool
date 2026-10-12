@@ -49,12 +49,32 @@ RPG Database Manager is a comprehensive desktop application for managing rolepla
 
 ### Main Interface
 
-The application uses a tabbed interface:
+The window has a **sidebar** on the left, a bar at the top, and the page you chose in the middle:
 
-- **Documents Tab**: Create, edit, and manage RPG entities (including World Settings for game world configuration)
-- **Game Sessions Tab**: Log and analyze game sessions
+- **Home**: an overview of the open campaign: how many entries each type has, the latest edits, the factions with their NPCs, and the latest sessions. Click a tile or a row to go there.
+- **Play > Sessions**: log and review game sessions.
+- **World**: one list per entity type (NPCs, Factions, Locations, Items, Quests, ... and your own types). Each shows the number of entries.
+- **Library > Templates**: manage the templates used for new entries.
+
+The **top bar** shows the open campaign (name, sessions and entries). Click it to switch to another campaign, create a new one, or open Manage Campaigns. Next to it is **Search everything**.
 
 Application settings can be accessed via the **Preferences** menu under Edit.
+
+#### Search everything (Ctrl+K)
+
+Press **Ctrl+K** (or Edit > Search Everything...) and type to find any entry of the campaign by name or text, shown with its picture. Use Up/Down and Enter to open one. The same box runs actions such as New from template, the Name Generator, Settings, Manage campaigns, full screen and "Go to ..." any page. With nothing typed it lists the entries edited most recently. **Help > Keyboard Shortcuts** lists all shortcuts.
+
+#### Working in a list
+
+- Each row shows the entry's picture (its initials on a colour if it has none), the name, race and faction (every faction has its own colour) and the module.
+- **Sort by** and the arrow button order the list; **Group by** groups it by module or, for people, by faction (click a group header to fold it). Your choice is remembered for each type.
+- Hover or select a row to see it in the **preview panel** on the right: large picture, race, faction, module, created, modified and the first words of the text.
+- **Filter** searches names and text. **Enter** or a double-click opens the entry.
+- Right-click a row for Open, Pin for tonight, Send to Discord (NPCs and locations) and Delete.
+
+#### Pinning entries for tonight
+
+Click the star at the right of a row (or use "Pin for tonight" in the right-click menu or the preview) to pin an entry. Pinned entries stay in the **Tonight** strip at the bottom of the window on every page: click one to open it, or the × to unpin. Pins belong to the campaign.
 
 ### Document Editing
 
@@ -70,27 +90,31 @@ The rich text editor provides formatting tools in the document viewer toolbar.
 
 #### Using Templates
 
-1. In the Documents tab, click **"New Document"**
-2. Select an entity type (NPC, Character, Faction, etc.)
-3. Choose a template or use the default
-4. Fill in the template fields
-5. Enter a title for your document
-6. Click **"Create Document"**
+1. Open the list of the entity type in the sidebar (NPCs, Factions, ...)
+2. Click **New** and choose **From template** (Ctrl+N)
+3. Enter a name for the new entry
+4. The editor opens with the type's default template; fill in the fields
+5. Click **Save** (or **Save & Close**)
 
-#### Manual Creation
+#### Blank Documents
 
-1. Create a new document using any template
-2. Edit the content in the rich text editor
-3. Use field placeholders like `[Name]`, `[Age]`, `[Faction]` for structure
-4. Add rich formatting as needed
-5. Save and approve when ready
+1. Click **New** and choose **Blank document** (Ctrl+Shift+N)
+2. Enter a name; the editor opens empty
+3. Use field placeholders like `[Name]`, `[Age]`, `[Faction]` for structure and add rich formatting as needed
+4. Save when ready
 
 ### Document Management
 
 #### Editing Documents
-- Double-click any document in the list to open it for editing
-- Use the rich text editor with formatting toolbar
+- Double-click any document in the list (or press Enter) to open it in the editor window
+- On the left: the primary picture (click to enlarge, right-click for options), the title, and the faction of a person; for a session its date, status and participants
+- On the right, the tabs: **Description** (the text, with a formatting toolbar), **Images**, **Connections**, and for people **Abilities** and **Inventory**
+- A marker at the top says "Unsaved changes"; closing the window asks whether to save them
 - Add field placeholders for structured data
+
+#### Deleting and Undo
+- Select an entry and press **Delete**, or use Delete in the right-click menu
+- The program asks first; afterwards the entry is hidden and a message offers **Undo** (or press Ctrl+Z) for 10 seconds, after which it is really deleted
 
 #### Approval Workflow
 - **Draft**: Initial document state
@@ -98,15 +122,15 @@ The rich text editor provides formatting tools in the document viewer toolbar.
 - **Archived**: Older documents for reference
 
 #### Search and Filtering
-- Use the search bar to find documents by content
-- Filter by entity type using the dropdown
-- Search across full document content for comprehensive results
+- Use the Filter box above a list to find entries by name or content
+- Use **Ctrl+K** to find any entry of the campaign, whatever its type
+- Sort and group a list with **Sort by** and **Group by**
 
 ### Game Session Management
 
 #### Logging Sessions
 
-1. Go to the **Game Sessions** tab
+1. Open **Sessions** in the sidebar
 2. Click **"New Session"**
 3. Enter session title and date
 4. Add participant names

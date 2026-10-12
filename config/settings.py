@@ -355,6 +355,15 @@ class Settings:
         value = f"{column},{sort_order}"
         self.set_custom_setting(key, value)
 
+    def get_entity_group_preference(self, entity_type: str) -> str:
+        """Get how an entity list is grouped: '' (not grouped), 'module' or 'faction'."""
+        value = self.get_custom_setting(f"entity_group_{entity_type}", "")
+        return value if value in ('module', 'faction') else ''
+
+    def set_entity_group_preference(self, entity_type: str, group: str) -> None:
+        """Set how an entity list is grouped: '' (not grouped), 'module' or 'faction'."""
+        self.set_custom_setting(f"entity_group_{entity_type}", group if group in ('module', 'faction') else '')
+
     def get_session_sort_preference(self) -> Tuple[int, str]:
         """Get the sort preference for the sessions tab.
 

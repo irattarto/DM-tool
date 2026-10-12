@@ -2,22 +2,21 @@
 Main window for RPG Database Manager desktop application.
 """
 
-import json
-from typing import Dict, Optional
+from typing import Optional
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QListWidget,
-    QListWidgetItem, QLineEdit, QPushButton,
+    QListWidgetItem, QPushButton,
     QLabel, QStatusBar, QMessageBox, QFileDialog,
     QTabWidget, QDialog, QInputDialog,
-    QMenu, QGroupBox, QFormLayout, QTreeWidget, QTreeWidgetItem, QHeaderView
+    QGroupBox, QFormLayout
 )
-from PyQt6.QtCore import Qt, QPoint, QTimer
-from PyQt6.QtGui import QAction
+from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 
 from config.settings import Settings
-from config.entity_types import get_registry, CAP_FACTION_LINK, CAP_RACE_COLUMN
+from config.entity_types import get_registry
 from gui.theme import set_props
 from config.version import APP_NAME, APP_VERSION, get_version_string
 from models.database import DatabaseManager
@@ -28,16 +27,21 @@ from services.image_service import ImageService
 from services.session_service import SessionService
 from utils.logger import get_logger
 from utils.ui_helpers import show_error, show_warning, show_info, show_question
-from utils.entity_metadata_extractor import extract_npc_metadata, extract_faction_metadata, format_date
 from gui.settings_dialog import SettingsDialog
 from gui.module_manager_dialog import ModuleManagerDialog
 from gui.database_cleanup_dialog import DatabaseCleanupDialog
 from gui.dialogs import (
     DocumentViewerWindow, TemplateEditorDialog
 )
+from gui.components.entity_list import ThumbnailLoader
+from gui.components.undo_toast import UndoToast
+from gui.components.home_page import HomePage
+from gui.entity_tabs import EntityTabsMixin
+from gui.home_and_pins import HomeAndPinsMixin
+from gui.shell import ShellMixin
 
 
-class MainWindow(QMainWindow):
+class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
     """
     Main window for the RPG Database Manager application.
     """
@@ -61,6 +65,7 @@ class MainWindow(QMainWindow):
         self.template_service = TemplateService(database_manager)
         self.image_service = ImageService()
         self.image_service.cleanup_orphan_thumbnails()
+        self.entity_thumbs = ThumbnailLoader(self.image_service)
         self.session_service = SessionService(database_manager)
 
         # Apply stored entity type customisations (labels, order, visibility, custom types)
@@ -72,8 +77,8 @@ class MainWindow(QMainWindow):
         # Current state
         self.current_module_id: Optional[int] = None
 
-        # Entity list sort state tracking (column, order) per entity type
-        self.entity_sort_state: Dict[str, tuple[int, Qt.SortOrder]] = {}
+        self._init_entity_state()
+        self._init_pins()
 
         # Setup UI
         self._setup_window()
@@ -90,6 +95,9 @@ class MainWindow(QMainWindow):
 
         # Apply settings
         self._apply_settings()
+
+        # Start on the Home page
+        self.tab_widget.setCurrentWidget(self.home_tab)
 
     def _setup_window(self):
         """Setup window properties."""
@@ -180,6 +188,13 @@ class MainWindow(QMainWindow):
         preferences_action.triggered.connect(self._on_settings)
         edit_menu.addAction(preferences_action)
 
+        edit_menu.addSeparator()
+        search_action = QAction("&Search Everything...", self)
+        search_action.setShortcut("Ctrl+K")
+        search_action.setStatusTip("Find any entry of the campaign or run an action")
+        search_action.triggered.connect(self._show_command_palette)
+        edit_menu.addAction(search_action)
+
         # View menu
         view_menu = menubar.addMenu("&View")
         self.fullscreen_action = QAction("&Full Screen", self)
@@ -201,6 +216,10 @@ class MainWindow(QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
+        shortcuts_action = QAction("&Keyboard Shortcuts", self)
+        shortcuts_action.triggered.connect(self._on_shortcuts)
+        help_menu.addAction(shortcuts_action)
+
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
@@ -210,17 +229,10 @@ class MainWindow(QMainWindow):
         toolbar = self.addToolBar("Main")
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
 
-        # Module management
-        self.module_label = QLabel("Current Campaign: None")
-        self.module_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        toolbar.addWidget(self.module_label)
-
-        toolbar.addSeparator()
+        # Campaign switcher and the search button (see gui/shell.py)
+        self._create_campaign_switcher(toolbar)
 
         # Document creation is now handled in individual entity tabs
-
-        # Update module label when module changes
-        self.module_label.setText(f"Current Campaign: {self.current_module_id or 'None'}")
         # The main layout is now handled by the tab widget in _setup_tab_widget
         # Status bar is created there too
 
@@ -244,7 +256,7 @@ class MainWindow(QMainWindow):
         """Setup the main tab widget for different application areas."""
         # Create central tab widget
         self.tab_widget = QTabWidget()
-        self.setCentralWidget(self.tab_widget)
+        self._build_shell()  # sidebar + pages (the sidebar replaces the tab bar)
 
         # Sessions tab (first tab for quick access during gameplay)
         self.sessions_tab = QWidget()
@@ -259,226 +271,30 @@ class MainWindow(QMainWindow):
         self._setup_templates_tab()
         self.tab_widget.addTab(self.templates_tab, "Templates")
 
+        # Home page (last in the page widget so the order of the others stays the same; the sidebar lists it first)
+        self.home_tab = HomePage(self.entity_thumbs)
+        self.home_tab.go_to.connect(self._on_sidebar_selected)
+        self.home_tab.open_entry.connect(self._open_palette_entry)
+        self.tab_widget.addTab(self.home_tab, "Home")
+        self._rebuild_sidebar()
+
 
         # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
 
-    def _setup_entity_tabs(self):
-        """Setup (or rebuild) one list tab per visible entity type, right after Sessions."""
-        registry = get_registry()
-        self.entity_types = {key: registry.plural(key) for key in registry.keys_for('tabs')}
+        # "Deleted - Undo" message and its keyboard shortcut
+        self.undo_toast = UndoToast(self)
+        self.undo_toast.undo_clicked.connect(self._undo_pending_delete)
+        QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo_pending_delete)
 
-        # Remember which generic entity tab is selected so a rebuild keeps the user's place
-        selected_key = None
-        old_tabs = getattr(self, 'entity_tabs', {})
-        current_widget = self.tab_widget.currentWidget()
-        for key, tab in old_tabs.items():
-            if tab is current_widget:
-                selected_key = key
 
-        insert_at = self.tab_widget.indexOf(self.sessions_tab) + 1
-        for tab in old_tabs.values():
-            index = self.tab_widget.indexOf(tab)
-            if index >= 0:
-                self.tab_widget.removeTab(index)
-            tab.deleteLater()
 
-        self.entity_tabs = {}
-        self.entity_lists = {}
-        self.entity_search_widgets = {}
 
-        for offset, (entity_type, display_name) in enumerate(self.entity_types.items()):
-            tab = QWidget()
-            self.entity_tabs[entity_type] = tab
-            self.tab_widget.insertTab(insert_at + offset, tab, display_name)
-            self._setup_entity_tab(tab, entity_type)
 
-        if selected_key in self.entity_tabs:
-            self.tab_widget.setCurrentWidget(self.entity_tabs[selected_key])
 
-    def _on_entity_types_changed(self):
-        """Entity types were edited in Settings: rebuild tabs and refresh dependent widgets."""
-        self._setup_entity_tabs()
 
-        if self.current_module_id:
-            self._load_documents()
-
-    def _entity_columns(self, entity_type: str):
-        """Column labels and default widths for an entity type's list, from its capabilities."""
-        registry = get_registry()
-        if registry.has_capability(entity_type, CAP_FACTION_LINK):
-            labels, widths = (['Name', 'Race', 'Faction', 'Created Date', 'Modified Date'],
-                              [200, 120, 150, 150, 150])
-        elif registry.has_capability(entity_type, CAP_RACE_COLUMN):
-            labels, widths = ['Name', 'Race', 'Created Date', 'Modified Date'], [250, 120, 150, 150]
-        else:
-            labels, widths = ['Name', 'Created Date', 'Modified Date'], [300, 150, 150]
-        if entity_type != 'module':
-            # appended last so saved sort/width preferences (by column index) keep working
-            labels, widths = labels + ['Module'], widths + [150]
-        return labels, widths
-
-    def _module_title_for(self, doc: dict) -> str:
-        """Title of the adventure module an entity was imported from, or ''."""
-        try:
-            module_doc_id = json.loads(doc['metadata']).get('module_doc_id') if doc.get('metadata') else None
-        except (TypeError, ValueError, AttributeError):
-            return ''
-        if module_doc_id is None:
-            return ''
-        cache = self.__dict__.setdefault('_module_title_cache', {})
-        if module_doc_id not in cache:
-            module_doc = self.db.get_document(module_doc_id)
-            cache[module_doc_id] = module_doc['title'] if module_doc else ''
-        return cache[module_doc_id]
-
-    def _fill_entity_row(self, item: QTreeWidgetItem, doc: dict, entity_type: str,
-                         valid_faction_names: set) -> None:
-        """Fill one list row; the columns depend on the type's capabilities."""
-        registry = get_registry()
-        created_date = format_date(doc.get('created_date'))
-        modified_date = format_date(doc.get('modified_date'))
-        item.setText(0, doc.get('title', 'Untitled'))
-
-        if registry.has_capability(entity_type, CAP_FACTION_LINK):
-            # Faction: metadata faction_id first, then validated text extraction
-            faction_name = ''
-            if doc.get('metadata'):
-                try:
-                    faction_id = json.loads(doc['metadata']).get('faction_id')
-                    if faction_id is not None:
-                        faction_doc = self.db.get_document(faction_id)
-                        if faction_doc:
-                            faction_name = faction_doc['title']
-                except Exception as e:
-                    self.logger.warning(f"Failed to parse metadata for {entity_type}: {e}")
-
-            extracted = extract_npc_metadata(doc.get('content', ''))
-            if not faction_name:
-                extracted_faction = extracted.get('faction')
-                if extracted_faction and extracted_faction.lower() in valid_faction_names:
-                    faction_name = extracted_faction
-
-            values = [extracted.get('race') or '', faction_name, created_date, modified_date]
-        elif registry.has_capability(entity_type, CAP_RACE_COLUMN):
-            race = extract_faction_metadata(doc.get('content', '')).get('race') or ''
-            values = [race, created_date, modified_date]
-        else:
-            values = [created_date, modified_date]
-        if entity_type != 'module':
-            values.append(self._module_title_for(doc))
-
-        for column, value in enumerate(values, start=1):
-            item.setText(column, value)
-
-    def _setup_entity_tab(self, tab: QWidget, entity_type: str):
-        """Setup a specific entity type tab."""
-        layout = QVBoxLayout(tab)
-
-        # Toolbar for this entity type
-        toolbar_layout = QHBoxLayout()
-
-        # Filter (for this entity type only)
-        filter_layout = QHBoxLayout()
-        filter_label = QLabel(f"Filter {get_registry().label(entity_type)}:")
-        filter_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        filter_layout.addWidget(filter_label)
-
-        search_edit = QLineEdit()
-        search_edit.setPlaceholderText(f"Search {entity_type}...")
-        search_edit.textChanged.connect(lambda text, et=entity_type: self._on_entity_search(text, et))
-        filter_layout.addWidget(search_edit)
-
-        toolbar_layout.addLayout(filter_layout)
-
-        # Post name + primary picture cards to Discord (kept on the left, away from Delete)
-        from gui.discord_actions import DISCORD_ENTITY_TYPES
-        if entity_type in DISCORD_ENTITY_TYPES:
-            discord_btn = QPushButton("Send to Discord...")
-            discord_btn.setToolTip(f"Choose {get_registry().label(entity_type)} to post to a Discord channel "
-                                   "(name and primary picture)")
-            discord_btn.clicked.connect(lambda checked, et=entity_type: self._on_send_entities_to_discord(et))
-            toolbar_layout.addWidget(discord_btn)
-            self.entity_discord_buttons = getattr(self, 'entity_discord_buttons', {})
-            self.entity_discord_buttons[entity_type] = discord_btn
-
-        toolbar_layout.addStretch()
-
-        # New document buttons for this entity type
-        new_with_template_btn = QPushButton(f"New {get_registry().label(entity_type)}")
-        new_with_template_btn.setToolTip(f"Create new {entity_type} with default template")
-        new_with_template_btn.clicked.connect(lambda checked, et=entity_type: self._on_new_entity_document(et, use_template=True))
-        toolbar_layout.addWidget(new_with_template_btn)
-
-        new_blank_btn = QPushButton(f"New Blank {get_registry().label(entity_type)}")
-        new_blank_btn.setToolTip(f"Create blank {entity_type} document")
-        new_blank_btn.clicked.connect(lambda checked, et=entity_type: self._on_new_entity_document(et, use_template=False))
-        toolbar_layout.addWidget(new_blank_btn)
-
-        # Delete button
-        delete_btn = QPushButton("Delete")
-        delete_btn.setToolTip(f"Delete selected {entity_type}")
-        delete_btn.clicked.connect(lambda checked, et=entity_type: self._on_delete_entity_document(et))
-        toolbar_layout.addWidget(delete_btn)
-
-        layout.addLayout(toolbar_layout)
-
-        # Document tree for this entity type (multi-column list)
-        doc_tree = QTreeWidget()
-        doc_tree.setRootIsDecorated(False)  # No tree hierarchy, just a flat list
-        doc_tree.setAlternatingRowColors(True)  # Better readability
-
-        # Columns come from the type's capabilities
-        column_labels, default_widths = self._entity_columns(entity_type)
-        doc_tree.setColumnCount(len(column_labels))
-        doc_tree.setHeaderLabels(column_labels)
-
-        # Enable sorting
-        doc_tree.setSortingEnabled(True)
-
-        # Load sort preference from settings or use default
-        saved_column, saved_order_str = self.settings.get_entity_sort_preference(entity_type)
-        saved_order = Qt.SortOrder.AscendingOrder if saved_order_str == 'asc' else Qt.SortOrder.DescendingOrder
-
-        # Set sort based on saved preference
-        doc_tree.sortByColumn(saved_column, saved_order)
-
-        # Initialize sort state for this entity type
-        self.entity_sort_state[entity_type] = (saved_column, saved_order)
-
-        # Connect to sort indicator changed signal to track user's sort preference
-        header = doc_tree.header()
-        header.sortIndicatorChanged.connect(lambda col, order, et=entity_type: self._on_sort_changed(et, col, order))
-
-        # Configure column resizing - Interactive allows user resizing
-        for column in range(len(column_labels)):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
-
-        # Restore saved column widths or use defaults
-        saved_widths = self.settings.get_column_widths(f'entity_{entity_type}')
-        widths = saved_widths if saved_widths and len(saved_widths) == len(column_labels) else default_widths
-        for column, width in enumerate(widths):
-            header.resizeSection(column, width)
-
-        # Connect to save column widths when resized
-        header.sectionResized.connect(lambda idx, old, new, et=entity_type: self._on_entity_column_resized(et, idx, old, new))
-
-        # Connect double-click
-        doc_tree.itemDoubleClicked.connect(lambda item, col, et=entity_type: self._on_entity_tree_item_selected(item, et))
-
-        if entity_type in DISCORD_ENTITY_TYPES:
-            doc_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            doc_tree.customContextMenuRequested.connect(
-                lambda pos, et=entity_type: self._on_entity_context_menu(et, pos))
-
-        self.entity_lists[entity_type] = doc_tree
-        layout.addWidget(doc_tree)
-
-        # Store search widget for this entity type
-        self.entity_search_widgets = getattr(self, 'entity_search_widgets', {})
-        self.entity_search_widgets[entity_type] = search_edit
 
 
     def _setup_sessions_tab(self):
@@ -862,101 +678,18 @@ class MainWindow(QMainWindow):
             self.logger.error(f"Error loading campaigns: {e}")
             show_error(self, "Error", f"Failed to load campaigns: {e}")
 
-    def _load_documents(self):
-        """Load documents for current campaign."""
-        if not self.current_module_id:
-            return
-
-        try:
-            # Load documents for each entity type
-            for entity_type in self.entity_types.keys():
-                self._load_entity_documents(entity_type)
 
 
 
-        except Exception as e:
-            self.logger.error(f"Error loading documents: {e}")
 
-    def _load_entity_documents(self, entity_type: str):
-        """Load documents for a specific entity type."""
-        if not self.current_module_id:
-            return
 
-        try:
-            self.logger.debug(f"Loading {entity_type} documents for campaign {self.current_module_id}")
-            self._module_title_cache = {}
-            documents = self.db.get_documents(self.current_module_id, entity_type)
-            self.logger.debug(f"Loaded {len(documents)} {entity_type} documents")
 
-            # For NPCs, get valid faction names for validation
-            valid_faction_names = set()
-            if get_registry().has_capability(entity_type, CAP_FACTION_LINK):
-                factions = self.db.get_documents(self.current_module_id, 'faction')
-                valid_faction_names = {f['title'].lower() for f in factions}
-                self.logger.debug(f"Loaded {len(valid_faction_names)} valid faction names for NPC validation")
 
-            # Update the appropriate tree widget
-            if entity_type in self.entity_lists:
-                doc_tree = self.entity_lists[entity_type]
 
-                # Save current selection and scroll position before clearing
-                selected_doc_id = None
-                current_item = doc_tree.currentItem()
-                if current_item:
-                    doc_data = current_item.data(0, Qt.ItemDataRole.UserRole)
-                    if doc_data:
-                        selected_doc_id = doc_data.get('id')
 
-                # Save scroll position
-                scroll_bar = doc_tree.verticalScrollBar()
-                scroll_position = scroll_bar.value() if scroll_bar else 0
 
-                # Temporarily disable sorting for faster insertion
-                doc_tree.setSortingEnabled(False)
-                doc_tree.clear()
 
-                for doc in documents:
-                    item = QTreeWidgetItem()
-                    self._fill_entity_row(item, doc, entity_type, valid_faction_names)
 
-                    # Store full document data in item
-                    item.setData(0, Qt.ItemDataRole.UserRole, doc)
-
-                    doc_tree.addTopLevelItem(item)
-
-                # Re-enable sorting and restore previous sort state
-                doc_tree.setSortingEnabled(True)
-
-                # Get saved sort state for this entity type, default to Name ascending
-                sort_column, sort_order = self.entity_sort_state.get(
-                    entity_type, (0, Qt.SortOrder.AscendingOrder)
-                )
-                doc_tree.sortByColumn(sort_column, sort_order)
-
-                # Restore previous selection if it still exists
-                # Use QTimer to ensure this happens after sorting completes
-                def restore_position():
-                    if selected_doc_id is not None:
-                        for i in range(doc_tree.topLevelItemCount()):
-                            item = doc_tree.topLevelItem(i)
-                            doc_data = item.data(0, Qt.ItemDataRole.UserRole)
-                            if doc_data and doc_data.get('id') == selected_doc_id:
-                                doc_tree.setCurrentItem(item)
-                                doc_tree.scrollToItem(item)
-                                self.logger.debug(f"Restored selection to document ID {selected_doc_id}")
-                                break
-
-                    # Restore scroll position
-                    if scroll_bar and selected_doc_id is None:
-                        # Only restore scroll if no item was selected (otherwise scrollToItem handles it)
-                        scroll_bar.setValue(scroll_position)
-                        self.logger.debug(f"Restored scroll position to {scroll_position}")
-
-                # Delay restoration to ensure it happens after sorting
-                QTimer.singleShot(0, restore_position)
-
-        except Exception as e:
-            self.logger.error(f"Error loading {entity_type} documents: {e}")
 
     def _on_new_module(self):
         """Handle new campaign creation."""
@@ -980,6 +713,7 @@ class MainWindow(QMainWindow):
 
     def _on_open_module(self):
         """Handle campaign opening."""
+        self._flush_pending_deletes()
         try:
             modules = self.db.get_modules()
             if not modules:
@@ -1013,6 +747,7 @@ class MainWindow(QMainWindow):
 
     def _on_manage_modules(self):
         """Open the Campaign Manager dialog."""
+        self._flush_pending_deletes()
         try:
             dialog = ModuleManagerDialog(self.db, self)
             dialog.module_changed.connect(self._on_module_changed)
@@ -1023,6 +758,7 @@ class MainWindow(QMainWindow):
 
     def _on_import_html_module(self):
         """Import an HTML adventure module into the current campaign (preview first)."""
+        self._flush_pending_deletes()
         if not self.current_module_id:
             show_warning(self, "No Campaign", "Select or create a campaign before importing a module.")
             return
@@ -1076,6 +812,7 @@ class MainWindow(QMainWindow):
 
     def _on_database(self):
         """Open database management dialog."""
+        self._flush_pending_deletes()
         try:
             from gui.database_dialog import DatabaseDialog
             dialog = DatabaseDialog(self.db, self.image_service, self)
@@ -1106,70 +843,9 @@ class MainWindow(QMainWindow):
             self.logger.error(f"Error opening database cleanup: {e}", exc_info=True)
             show_error(self, "Error", f"Failed to open database cleanup: {e}")
 
-    def _on_sort_changed(self, entity_type: str, column: int, order: Qt.SortOrder):
-        """Track sort state changes for entity lists."""
-        self.entity_sort_state[entity_type] = (column, order)
-        self.logger.debug(f"Sort changed for {entity_type}: column={column}, order={order}")
 
-        # Persist sort preference to settings
-        order_str = 'asc' if order == Qt.SortOrder.AscendingOrder else 'desc'
-        self.settings.set_entity_sort_preference(entity_type, column, order_str)
-        self.settings.save_settings()
 
-    def _on_entity_column_resized(self, entity_type: str, index: int, old_size: int, new_size: int):
-        """Save column widths when an entity column is resized."""
-        if entity_type in self.entity_lists:
-            doc_tree = self.entity_lists[entity_type]
-            header = doc_tree.header()
-            widths = [header.sectionSize(i) for i in range(header.count())]
-            self.settings.set_column_widths(f'entity_{entity_type}', widths)
 
-    def _on_send_entities_to_discord(self, entity_type: str, preselected_ids=()):
-        """Open the picker for NPCs / locations and send the chosen ones to Discord."""
-        from gui.discord_actions import send_entities_to_discord
-        send_entities_to_discord(self, self.db, self.current_module_id, entity_type,
-                                 get_registry().plural(entity_type), preselected_ids)
-
-    def _on_entity_context_menu(self, entity_type: str, pos):
-        """Right-click on an entity row: offer Discord (never Delete) for the clicked row."""
-        doc_tree = self.entity_lists[entity_type]
-        item = doc_tree.itemAt(pos)
-        if item is None:
-            return
-        doc_tree.setCurrentItem(item)
-        document = item.data(0, Qt.ItemDataRole.UserRole) or {}
-        menu = QMenu(self)
-        action = menu.addAction("Send to Discord...")
-        if menu.exec(doc_tree.viewport().mapToGlobal(pos)) is action:
-            self._on_send_entities_to_discord(entity_type, [document['id']] if document.get('id') else ())
-
-    def _on_entity_tree_item_selected(self, item: QTreeWidgetItem, entity_type: str):
-        """Handle document selection in entity-specific tabs (tree widget version)."""
-        try:
-            document_data = item.data(0, Qt.ItemDataRole.UserRole)
-            if document_data:
-                # Ensure document_data is a dictionary
-                if not isinstance(document_data, dict):
-                    self.logger.error(f"Invalid document data type: {type(document_data)}")
-                    show_warning(self, "Document Error", "Invalid document data format.")
-                    return
-
-                # Safely create document object
-                try:
-                    self.logger.debug(f"Creating document object from data: {document_data}")
-                    document = Document.from_dict(document_data)
-                    self.logger.debug(f"Document object created: ID={document.id}, title={document.title}")
-
-                    # Open document in new window
-                    self._open_document_window(document)
-                except Exception as doc_error:
-                    self.logger.error(f"Error creating document object: {doc_error}")
-                    show_warning(self, "Document Error", f"Failed to load document: {doc_error}")
-                    return
-
-        except Exception as e:
-            self.logger.error(f"Error selecting document: {e}")
-            show_warning(self, "Selection Error", f"Failed to select document: {e}")
 
     def _open_document_window(self, document: Document):
         """Open document in a new window."""
@@ -1254,120 +930,7 @@ class MainWindow(QMainWindow):
             )
             self.logger.error(f"Error navigating to internal link: {e}", exc_info=True)
 
-    def _on_entity_search(self, text: str, entity_type: str):
-        """Handle search within a specific entity type tab."""
-        try:
-            if not text.strip():
-                # If search is empty, reload all documents for this entity type
-                self._load_entity_documents(entity_type)
-                return
 
-            # Get all documents for this entity type
-            self._module_title_cache = {}
-            documents = self.db.get_documents(self.current_module_id, entity_type)
-
-            # For NPCs, get valid faction names for validation
-            valid_faction_names = set()
-            if get_registry().has_capability(entity_type, CAP_FACTION_LINK):
-                factions = self.db.get_documents(self.current_module_id, 'faction')
-                valid_faction_names = {f['title'].lower() for f in factions}
-
-            # Filter by search text
-            filtered_docs = []
-            search_lower = text.lower()
-            for doc in documents:
-                if (search_lower in doc['title'].lower() or
-                    search_lower in doc['content'].lower()):
-                    filtered_docs.append(doc)
-
-            # Update the tree widget
-            if entity_type in self.entity_lists:
-                doc_tree = self.entity_lists[entity_type]
-
-                # Temporarily disable sorting for faster insertion
-                doc_tree.setSortingEnabled(False)
-                doc_tree.clear()
-
-                for doc in filtered_docs:
-                    item = QTreeWidgetItem()
-                    self._fill_entity_row(item, doc, entity_type, valid_faction_names)
-
-                    # Store full document data in item
-                    item.setData(0, Qt.ItemDataRole.UserRole, doc)
-
-                    doc_tree.addTopLevelItem(item)
-
-                # Re-enable sorting and restore previous sort state
-                doc_tree.setSortingEnabled(True)
-
-                # Get saved sort state for this entity type, default to Name ascending
-                sort_column, sort_order = self.entity_sort_state.get(
-                    entity_type, (0, Qt.SortOrder.AscendingOrder)
-                )
-                doc_tree.sortByColumn(sort_column, sort_order)
-
-        except Exception as e:
-            self.logger.error(f"Error searching {entity_type} documents: {e}")
-
-    def _on_new_entity_document(self, entity_type: str, use_template: bool = True):
-        """Handle new document creation for a specific entity type."""
-        if not self.current_module_id:
-            show_warning(self, "No Campaign", "Please create or open a campaign first.")
-            return
-
-        try:
-            # Get document title
-            from PyQt6.QtWidgets import QInputDialog
-
-            title, ok = QInputDialog.getText(
-                self,
-                f"New {get_registry().label(entity_type)}",
-                f"Enter {get_registry().label(entity_type)} name:"
-            )
-
-            if not ok or not title.strip():
-                return
-
-            document_id = None
-
-            if use_template:
-                # Create document with default template for this entity type
-                template = self.template_service.get_default_template(entity_type)
-                if template:
-                    document_id = self.template_service.create_document_from_template(
-                        template, {}, title, self.current_module_id
-                    )
-                else:
-                    # No template available, ask if user wants to create blank document
-                    if show_question(
-                        self,
-                        "No Template",
-                        f"No default template found for {entity_type}. Create blank document instead?"
-                    ):
-                        document_id = self._create_blank_document(entity_type, title)
-            else:
-                # Create blank document
-                document_id = self._create_blank_document(entity_type, title)
-
-            if document_id:
-                # Refresh the specific entity tab
-                self._load_entity_documents(entity_type)
-
-                # Open the new document in viewer window
-                documents = self.db.get_documents(self.current_module_id, entity_type)
-                for doc in documents:
-                    if doc['id'] == document_id:
-                        document = Document.from_dict(doc)
-                        self._open_document_window(document)
-                        break
-
-                self.status_bar.showMessage(f"Created {entity_type}: {title}")
-            else:
-                show_error(self, "Error", f"Failed to create {entity_type}.")
-
-        except Exception as e:
-            self.logger.error(f"Error creating {entity_type} document: {e}")
-            show_error(self, "Error", f"Failed to create {entity_type}: {e}")
 
     def _on_tab_changed(self, index: int):
         """Handle tab changes to load content when needed."""
@@ -1375,7 +938,10 @@ class MainWindow(QMainWindow):
             tab_text = self.tab_widget.tabText(index)
             self.logger.debug(f"Tab changed to: {tab_text}")
 
-            if tab_text == "Templates":
+            if tab_text == "Home":
+                self._refresh_home()
+
+            elif tab_text == "Templates":
                 # Load templates when Templates tab is activated
                 self._load_templates()
 
@@ -1388,74 +954,10 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.logger.error(f"Error handling tab change: {e}")
 
-    def _on_delete_entity_document(self, entity_type: str):
-        """Handle document deletion for a specific entity type."""
-        self.logger.info(f"Entity document deletion initiated - Type: {entity_type}, Campaign: {self.current_module_id}")
 
-        if not self.current_module_id:
-            self.logger.warning("No campaign selected for entity deletion")
-            show_warning(self, "No Campaign", "Please create or open a campaign first.")
-            return
 
-        try:
-            # Get the currently selected item in the entity tree
-            if entity_type in self.entity_lists:
-                doc_tree = self.entity_lists[entity_type]
-                current_item = doc_tree.currentItem()
 
-                if not current_item:
-                    self.logger.debug(f"No {entity_type} selected for deletion")
-                    show_info(self, "No Selection", f"Please select a {entity_type} to delete.")
-                    return
 
-                document_data = current_item.data(0, Qt.ItemDataRole.UserRole)
-                if not document_data:
-                    self.logger.error(f"Invalid document data for {entity_type} deletion")
-                    show_warning(self, "Invalid Selection", "Invalid document selection.")
-                    return
-
-                self.logger.info(f"Deleting {entity_type} document - ID: {document_data['id']}, Title: {document_data['title']}")
-
-                # Confirm deletion
-                if show_question(
-                    self,
-                    "Confirm Deletion",
-                    f"Are you sure you want to delete '{document_data['title']}'?\n\nThis action cannot be undone."
-                ):
-                    self.logger.info(f"User confirmed deletion of {entity_type} document {document_data['id']}")
-                    # Delete the document
-                    success = self.db.delete_document(document_data['id'])
-
-                    if success:
-                        self.logger.info(f"Successfully deleted {entity_type} document {document_data['id']}")
-                        self.status_bar.showMessage(f"Deleted {entity_type}: {document_data['title']}")
-                        # Refresh the entity tab
-                        self._load_entity_documents(entity_type)
-                    else:
-                        self.logger.error(f"Failed to delete {entity_type} document {document_data['id']}")
-                        show_warning(self, "Delete Failed", "Failed to delete document.")
-
-        except Exception as e:
-            self.logger.error(f"Error deleting {entity_type} document: {e}", exc_info=True)
-            show_error(self, "Error", f"Failed to delete {entity_type}: {e}")
-
-    def _create_blank_document(self, entity_type: str, title: str) -> Optional[int]:
-        """Create a blank document without using a template."""
-        try:
-            # Create document with minimal content
-            blank_content = f"{get_registry().label(entity_type)}: {title}\n\n[Add your content here...]"
-
-            return self.db.create_document(
-                module_id=self.current_module_id,
-                entity_type=entity_type,
-                title=title,
-                content=blank_content,
-                created_by="user",
-                status="draft"
-            )
-        except Exception as e:
-            self.logger.error(f"Error creating blank document: {e}")
-            return None
 
     # Old document display methods removed - now using DocumentViewerWindow
 
@@ -1466,17 +968,17 @@ class MainWindow(QMainWindow):
                 module = self.db.get_module(self.current_module_id)
                 if module:
                     self.setWindowTitle(f"{APP_NAME} v{APP_VERSION} - {module['name']}")
-                    self.module_label.setText(f"Current Campaign: {module['name']}")
+                    self._update_campaign_button(module['name'])
                 else:
                     self.setWindowTitle(get_version_string())
-                    self.module_label.setText("Current Campaign: None")
+                    self._update_campaign_button('')
             except (KeyError, TypeError, AttributeError):
                 # Database access failed or module data invalid
                 self.setWindowTitle(get_version_string())
-                self.module_label.setText("Current Campaign: None")
+                self._update_campaign_button('')
         else:
             self.setWindowTitle(get_version_string())
-            self.module_label.setText("Current Campaign: None")
+            self._update_campaign_button('')
 
     def _apply_settings(self):
         """Apply application settings to UI."""
@@ -1751,6 +1253,8 @@ class MainWindow(QMainWindow):
             # User cancelled the close
             event.ignore()
             return
+
+        self._flush_pending_deletes()  # a delete still in its undo window is carried out now
 
         # Clean up session widget to prevent Qt object lifecycle issues
         if hasattr(self, 'session_widget') and self.session_widget is not None:

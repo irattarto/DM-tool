@@ -3,7 +3,7 @@ import pytest
 
 pytest.importorskip("PyQt6")
 from PyQt6.QtCore import QStandardPaths
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QPushButton
 
 
 @pytest.fixture(scope="module")
@@ -159,7 +159,10 @@ def test_discord_button_only_on_npc_and_location_tabs(app):
     try:
         assert sorted(window.entity_discord_buttons) == ['location', 'npc']
         assert window.entity_discord_buttons['npc'].text() == "Send to Discord..."
+        # every list has a right-click menu (Open, Delete; plus Discord on npc/location)
         assert window.entity_lists['npc'].contextMenuPolicy().name == 'CustomContextMenu'
-        assert window.entity_lists['faction'].contextMenuPolicy().name != 'CustomContextMenu'
+        assert window.entity_lists['faction'].contextMenuPolicy().name == 'CustomContextMenu'
+        # Delete is in that menu and on the Delete key, no longer a toolbar button
+        assert not [b for b in window.entity_tabs['npc'].findChildren(QPushButton) if b.text() == "Delete"]
     finally:
         window.deleteLater()

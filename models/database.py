@@ -892,6 +892,16 @@ Notes:
 
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_module_counts(self, module_id: int) -> Dict[str, Any]:
+        """Entries per entity type and number of sessions of a module, for the sidebar and campaign switcher."""
+        with self.connection.transaction() as conn:
+            per_type = {row['entity_type']: row['count'] for row in conn.execute(
+                "SELECT entity_type, COUNT(*) AS count FROM documents WHERE module_id = ? GROUP BY entity_type",
+                (module_id,))}
+            sessions = conn.execute(
+                "SELECT COUNT(*) AS count FROM game_sessions WHERE module_id = ?", (module_id,)).fetchone()['count']
+        return {'documents': per_type, 'sessions': sessions}
+
     def get_module(self, module_id: int) -> Optional[Dict[str, Any]]:
         """Get a specific module by ID."""
         with self.connection.transaction() as conn:
@@ -2048,6 +2058,46 @@ Notes:
         except Exception as e:
             self.logger.error(f"Failed to get primary image: {e}", exc_info=True)
             return None
+
+    def get_primary_images_for_documents(self, document_ids) -> Dict[int, Dict[str, Any]]:
+        """
+        Get the primary image of every given document in as few queries as possible.
+
+        Used by the entity lists to show thumbnails without one query per row.
+
+        Args:
+            document_ids: IDs of the documents
+
+        Returns:
+            Dict of document ID -> image record; documents without a primary image are absent
+        """
+        ids = [int(doc_id) for doc_id in document_ids]
+        result: Dict[int, Dict[str, Any]] = {}
+        if not ids:
+            return result
+
+        try:
+            with self.connection.transaction() as conn:
+                for start in range(0, len(ids), 500):  # stay well below SQLite's variable limit
+                    chunk = ids[start:start + 500]
+                    marks = ",".join("?" * len(chunk))
+                    cursor = conn.execute(f"""
+                        SELECT id, module_id, document_id, filename, file_path
+                        FROM images
+                        WHERE is_primary = 1 AND document_id IN ({marks})
+                    """, chunk)
+                    for row in cursor.fetchall():
+                        result[row['document_id']] = {
+                            'id': row['id'],
+                            'module_id': row['module_id'],
+                            'document_id': row['document_id'],
+                            'filename': row['filename'],
+                            'file_path': row['file_path'],
+                        }
+        except Exception as e:
+            self.logger.error(f"Failed to get primary images for documents: {e}", exc_info=True)
+
+        return result
 
     def auto_set_primary_if_needed(self, document_id: int) -> bool:
         """

@@ -5,6 +5,24 @@ All notable changes to RPG Database Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-12
+
+### Added
+- **Sidebar** replaces the row of tabs: Home, Play (Sessions), World (every visible entity type, custom ones too, each with a small icon and its number of entries) and Library (Templates).
+- **Home page** (opens at start): a tile per entity type with its count and the latest pictures, the six latest edits, the factions with the number of NPCs in each, and the latest sessions. It only shows what the app already stores.
+- **Campaign switcher** at the top (name, badge with initials, "N sessions · M entries"): switch between campaigns, create one, or open Manage Campaigns.
+- **Search everything** (Ctrl+K, Edit menu): finds entries by name or text, with their pictures, and runs actions (New from template, Name Generator, Settings, Manage campaigns, full screen, Go to any page). With nothing typed it lists the recently edited entries.
+- **Thumbnail entity lists**: every list shows the entry's primary picture (initials on a colour when there is none), the name, race · faction (each faction name in its own colour, made from the name) and the module. A **preview panel** shows the large picture, race, faction, module, created, modified and the first words of the text; it has Open, Pin for tonight and, where available, Send to Discord.
+- **Sort by / Group by** in every list (group by Module, or by Faction where entries have one); click a group header to fold it. The sort choice and grouping are remembered per entity type.
+- **Pinned tray "Tonight"** at the bottom: pin entries with the star on a row, the right-click menu or the preview, and open them from any page. Pins are kept per campaign in the database (no schema change).
+- **Delete with Undo**: delete (right-click menu or the Delete key) still asks first, then the entry is hidden and can be brought back with Undo or Ctrl+Z for 10 seconds before it is really deleted. Enter opens the selected row.
+- **New** is one button with "From template" (Ctrl+N) and "Blank document" (Ctrl+Shift+N). Help > Keyboard Shortcuts lists the shortcuts.
+- **Editor window**: the picture, title and faction (or date, status and participants of a session) are on the left, the tabs (Description, Images, Connections, Abilities, Inventory) on the right, and a marker shows unsaved changes.
+
+### Changed
+- The list headers no longer sort; use Sort by. The Delete button and the separate "New Blank" button are gone (see above). The Metadata tab of the editor is gone: the faction is now on the left of the window.
+- The entity list code moved out of `gui/main_window.py` into `gui/entity_tabs.py`; the sidebar, campaign switcher and search are in `gui/shell.py`, Home and pins in `gui/home_and_pins.py`.
+
 ## [1.6.0] - 2026-10-11
 
 ### Restored

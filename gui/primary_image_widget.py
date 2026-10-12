@@ -24,7 +24,7 @@ class PrimaryImageWidget(QWidget):
 
     go_to_images_tab = pyqtSignal()  # Emitted when user wants to go to Images tab
 
-    def __init__(self, document_id: int, document_title: str, db_manager, parent=None):
+    def __init__(self, document_id: int, document_title: str, db_manager, parent=None, size: int = 50):
         """
         Initialize primary image widget.
 
@@ -33,8 +33,10 @@ class PrimaryImageWidget(QWidget):
             document_title: Title of the document/entity
             db_manager: DatabaseManager instance
             parent: Parent widget
+            size: Side of the square picture area in pixels (50 for the small thumbnail)
         """
         super().__init__(parent)
+        self.size_px = size
         self.document_id = document_id
         self.document_title = document_title
         self.db_manager = db_manager
@@ -55,7 +57,7 @@ class PrimaryImageWidget(QWidget):
 
         # Image label
         self.image_label = QLabel()
-        self.image_label.setFixedSize(50, 50)
+        self.image_label.setFixedSize(self.size_px, self.size_px)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         set_props(self.image_label, role="card")
         self.image_label.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -81,7 +83,7 @@ class PrimaryImageWidget(QWidget):
 
                 if file_path and Path(file_path).exists():
                     # Load thumbnail
-                    thumbnail = self.image_service.get_thumbnail(file_path, size=50)
+                    thumbnail = self.image_service.get_thumbnail(file_path, size=self.size_px)
 
                     if thumbnail and not thumbnail.isNull():
                         set_props(self.image_label, role="card")
@@ -103,7 +105,7 @@ class PrimaryImageWidget(QWidget):
         self.image_label.setText("?")
         set_props(self.image_label, role="dropzone", dragActive=False)
         placeholder_font = self.image_label.font()
-        placeholder_font.setPointSize(20)
+        placeholder_font.setPointSize(20 if self.size_px <= 60 else 40)
         self.image_label.setFont(placeholder_font)
         self.image_label.setToolTip("No primary image\nClick to go to Images tab")
 
