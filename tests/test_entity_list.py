@@ -117,7 +117,7 @@ def test_sort_choice_and_direction(app):
         tree = window.entity_lists['npc']
         combo = window.entity_sort_combos['npc']
         assert [combo.itemText(i) for i in range(combo.count())] == \
-            ['Name', 'Race', 'Faction', 'Created Date', 'Modified Date', 'Module']
+            ['Name', 'Race', 'Faction', 'Created Date', 'Modified Date', 'Module', 'Last seen']
 
         combo.setCurrentIndex(1)  # race: Dwarf, Elf, Human
         assert _titles(tree) == ["Borin", "Aria", "Cora"]

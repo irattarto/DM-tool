@@ -21,9 +21,11 @@ from utils.ui_helpers import show_info
 
 SHORTCUTS = (
     ("Ctrl+K", "Search all entries and actions"),
+    ("Ctrl+Space", "Quick capture: add a line to the current session"),
     ("Ctrl+N", "New entry from the template (on an entity list)"),
     ("Ctrl+Shift+N", "New blank entry (on an entity list)"),
     ("Enter", "Open the selected entry"),
+    ("Tab", "Accept the grey name suggestion while typing and make it a link"),
     ("Delete", "Delete the selected entry (asks first, then Undo)"),
     ("Ctrl+Z", "Undo the last delete (for 10 seconds)"),
     ("F11", "Full screen"),
@@ -129,7 +131,18 @@ class ShellMixin:
         except Exception as e:
             self.logger.warning(f"Could not count entries: {e}")
             return
-        waiting = Counter(entity_type for entity_type, _data in self._pending_deletes.values())
+        if not self._scope_all:   # count only what the scope shows
+            try:
+                summaries = self.db.get_document_summaries(self.current_module_id)
+            except Exception as e:
+                self.logger.warning(f"Could not count entries: {e}")
+                return
+            counts = {'documents': Counter(d['entity_type'] for d in summaries
+                                           if self._in_scope(d['id'], d['entity_type'])),
+                      'sessions': sum(1 for d in summaries if d['entity_type'] == 'session'
+                                      and self._in_scope(d['id'], 'session'))}
+        waiting = Counter(entity_type for entity_type, data in self._pending_deletes.values()
+                          if self._in_scope(data['id'], entity_type))
         total = 0
         for entity_type in self.entity_types:
             number = max(0, counts['documents'].get(entity_type, 0) - waiting.get(entity_type, 0))
@@ -156,6 +169,7 @@ class ShellMixin:
         self.campaign_menu.aboutToShow.connect(self._fill_campaign_menu)
         self.campaign_button.setMenu(self.campaign_menu)
         toolbar.addWidget(self.campaign_button)
+        self._create_scope_button(toolbar)   # which adventure modules the lists show
         toolbar.addSeparator()
 
         self.search_button = QToolButton()
@@ -216,6 +230,8 @@ class ShellMixin:
         if module_id == self.current_module_id:
             return
         self._flush_pending_deletes()
+        self._scope_all, self._scope_modules, self._scope_none = True, set(), False   # other campaign, other modules
+        self._list_module_filter.clear()
         module = self.db.get_module(module_id)
         if not module:
             return
@@ -256,7 +272,8 @@ class ShellMixin:
         self._flush_pending_deletes()  # the palette reads the database: a deleted entry must not be offered
         registry = get_registry()
         labels = {key: registry.label(key) for key in registry.keys_for('context')}
-        documents = [d for d in self.db.get_documents(self.current_module_id) if d.get('entity_type') in labels]
+        documents = [d for d in self.db.get_documents(self.current_module_id)
+                     if d.get('entity_type') in labels and self._in_scope(d['id'], d.get('entity_type', ''))]
         palette = CommandPalette(self, documents, labels, self.entity_thumbs, self._palette_images,
                                  self._palette_actions())
         palette.entity_chosen.connect(self._open_palette_entry)
@@ -278,7 +295,7 @@ class ShellMixin:
         self._open_document_window(Document.from_dict(document))
 
     def _on_html_module_guide(self):
-        """Help > HTML Module Guide (F1): the rules for writing an importable HTML module."""
+        """Help > Guides (F1): the rules for writing an importable HTML module."""
         from gui.dialogs.html_module_guide import open_html_module_guide
         open_html_module_guide(self)
 

@@ -3,6 +3,7 @@ Document viewer window for viewing and editing individual documents.
 """
 
 import json
+import weakref
 
 from config.entity_types import get_registry, CAP_SESSION, CAP_FACTION_LINK, CAP_ABILITIES, CAP_INVENTORY
 from PyQt6.QtWidgets import (
@@ -21,6 +22,7 @@ from utils.ui_helpers import show_error, show_warning, show_question
 from utils.sounds import play_recording_stopped, prepare_recording_stopped
 from gui.image_gallery_widget import ImageGalleryWidget
 from gui.primary_image_widget import PrimaryImageWidget
+from gui.components.module_picker import ModulePickerButton
 from gui.widgets.formatted_text_edit import FormattedTextEdit
 from gui.ability_widget import AbilityWidget
 from gui.inventory_widget import InventoryWidget
@@ -30,6 +32,12 @@ from config.settings import Settings
 
 class DocumentViewerWindow(QMainWindow):
     """Window for viewing and editing individual documents."""
+
+    _open_windows = weakref.WeakSet()    # editor windows that are open now (Quick capture writes through them)
+
+    @classmethod
+    def find_open(cls, document_id: int):
+        return next((w for w in list(cls._open_windows) if w.document.id == document_id), None)
 
     def __init__(self, document: Document, database_manager: DatabaseManager, parent=None):
         super().__init__(parent)
@@ -57,6 +65,7 @@ class DocumentViewerWindow(QMainWindow):
 
         self._setup_ui()
         self._display_document()
+        DocumentViewerWindow._open_windows.add(self)
 
     @property
     def _is_dirty(self) -> bool:
@@ -118,26 +127,165 @@ class DocumentViewerWindow(QMainWindow):
         except (TypeError, ValueError, AttributeError):
             return ''
 
+    def _on_history(self):
+        """Show the earlier versions of this entry; Restore puts one into the editor."""
+        from PyQt6.QtWidgets import QDialog
+        from gui.dialogs.history_dialog import HistoryDialog
+        dialog = HistoryDialog(self.document.title, self.db.get_document_versions(self.document.id), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.restored:
+            self.title_edit.setText(dialog.restored['title'])
+            self.content_edit.set_content(dialog.restored.get('content') or '')
+            self._is_dirty = True
+            self.statusBar().showMessage("Earlier version restored - save to keep it")
+
+    def _on_map(self):
+        if self.main_window is not None:
+            self.main_window._show_relationship_map(self.document.id)
+
+    def append_note(self, markdown_line: str):
+        """Add a line at the end of the text and save (Quick capture while this window is open)."""
+        text = self.content_edit.get_content().rstrip()
+        self.content_edit.set_content(f"{text}\n{markdown_line}" if text else markdown_line)
+        self._skip_name_offer = True
+        try:
+            self._on_save()
+        finally:
+            self._skip_name_offer = False
+
+    def _setup_name_completion(self):
+        """Tab completes the names of other entries while typing (can be switched off in Tools > Automation)."""
+        edit = self.content_edit
+        edit.exclude_doc_id = self.document.id
+        edit.completer.enabled = bool(self.settings.get_custom_setting('auto_name_suggestions', True))
+        if self.main_window is not None and hasattr(self.main_window, '_pins'):
+            edit.name_priorities = lambda: list(self.main_window._pins)
+        if self.main_window is not None:
+            edit.create_entry_callback = self._create_entry_for_text
+
+    def _create_entry_for_text(self, kind: str, title: str):
+        """A new entry from a name in this text (template of the type if there is one); the lists follow."""
+        from services.quick_entry import create_entry
+        template_service = getattr(self.main_window, 'template_service', None)
+        doc_id = create_entry(self.db, template_service, self.document.module_id, kind, title)
+        if doc_id and hasattr(self.main_window, '_load_entity_documents'):
+            self.main_window._invalidate_link_graph()
+            self.main_window._load_entity_documents(kind)
+            self.main_window._refresh_sidebar_counts()
+        return doc_id
+
+    _IGNORED_NAMES_KEY = "ignored_names_{module_id}"
+
+    def _offer_new_names(self):
+        """After a save: capitalised names that match no entry are offered as new entries (can be switched off)."""
+        from PyQt6.QtWidgets import QDialog
+        from gui.dialogs.health_dialogs import IGNORE, NewNamesDialog
+        from utils.name_matching import find_new_names
+        window = self.main_window
+        if (window is None or self._skip_name_offer or not self.isVisible() or self.document.entity_type == 'module'
+                or not window.automation_enabled('auto_new_names')):
+            return
+        key = self._IGNORED_NAMES_KEY.format(module_id=self.document.module_id)
+        try:
+            ignored = json.loads(self.db.get_app_meta(key, '[]') or '[]')
+            titles = [d['title'] for d in self.db.get_document_summaries(self.document.module_id)]
+        except (TypeError, ValueError):
+            ignored, titles = [], []
+        names = find_new_names(self.document.content or '', titles, list(ignored) + list(self._offered_names))
+        if not names:
+            return
+        self._offered_names.update(names)
+        dialog = NewNamesDialog(names, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        created = False
+        for name, kind in dialog.choices().items():
+            if kind == IGNORE:
+                ignored.append(name)
+            elif kind:
+                doc_id = self._create_entry_for_text(kind, name)
+                if doc_id:
+                    self._link_first_mention(name, kind, doc_id)
+                    created = True
+        self.db.set_app_meta(key, json.dumps(sorted(set(ignored))))
+        if created:
+            self.content_edit.forget_names()
+            self._skip_name_offer = True
+            try:
+                self._on_save()      # the new links are part of the text now
+            finally:
+                self._skip_name_offer = False
+
+    def _link_first_mention(self, name: str, kind: str, doc_id: int):
+        """Make the first plain mention of ``name`` in the text a link to the new entry."""
+        from PyQt6.QtGui import QTextCharFormat, QTextDocument
+        document = self.content_edit.document()
+        flags = QTextDocument.FindFlag.FindCaseSensitively | QTextDocument.FindFlag.FindWholeWords
+        cursor = document.find(name, 0, flags)
+        while not cursor.isNull():
+            if not cursor.charFormat().isAnchor():
+                link = QTextCharFormat()
+                link.setAnchor(True)
+                link.setAnchorHref(f"rpg://{kind}/{doc_id}")
+                link.setForeground(self.content_edit.palette().link())
+                link.setFontUnderline(True)
+                cursor.mergeCharFormat(link)
+                return
+            cursor = document.find(name, cursor, flags)
+
+    def _module_choices(self):
+        """The adventure modules of the campaign, and the ones this entry belongs to now."""
+        modules, selected = {}, []
+        try:
+            modules = {d['id']: d['title'] for d in self.db.get_document_summaries(self.document.module_id)
+                       if d['entity_type'] == 'module'}
+            selected = [r['other_id'] for r in self.db.get_relationships_for_document(self.document.id)
+                        if r['relationship_type'] == 'belongs_to_module' and r['direction'] == 'out']
+        except Exception as e:
+            self.logger.warning(f"Could not load the modules: {e}")
+        return modules, selected
+
+    def _link_graph(self):
+        """The campaign's link graph (the main window keeps one; a window without a parent builds its own)."""
+        if self.main_window is not None and hasattr(self.main_window, '_get_link_graph'):
+            return self.main_window._get_link_graph()
+        from services.link_service import build_link_graph
+        return build_link_graph(self.db, self.document.module_id)
+
     def _build_connections_tab(self):
-        """Read-only list of linked documents, or None when there are none."""
+        """Read-only list of what this entry is connected to, or None when there is nothing."""
         import html
         from PyQt6.QtWidgets import QTextBrowser
 
         try:
             rows = self.db.get_relationships_for_document(self.document.id)
+            graph = self._link_graph()
         except Exception as e:
             self.logger.warning(f"Could not load connections: {e}")
             return None
-        if not rows:
-            return None
 
         registry = get_registry()
+
+        def entry_list(documents):
+            return ''.join(
+                f'<li><a href="rpg://{html.escape(d["entity_type"])}/{int(d["id"])}">{html.escape(d["title"])}</a> '
+                f'<i>({html.escape(registry.label(d["entity_type"]))})</i></li>' for d in documents)
+
+        parts = []
+        if get_registry().has_capability(self.document.entity_type, CAP_SESSION):
+            cast = graph.cast_of(self.document.id)
+            if cast:
+                parts.append(f"<h4>Cast and places</h4><ul>{entry_list(cast)}</ul>")
+        else:
+            seen = graph.sessions_of(self.document.id)
+            if seen:
+                parts.append(f"<h4>Last seen in {html.escape(seen[0]['title'])}</h4>")
+            mentioned = [d for d in graph.mentioned_in(self.document.id)]
+            if mentioned:
+                parts.append(f"<h4>Mentioned in</h4><ul>{entry_list(mentioned)}</ul>")
         sections = {}
         for row in rows:
             key = (row['relationship_type'], row['direction'])
             sections.setdefault(key, []).append(row)
-
-        parts = []
         for key in sorted(sections, key=lambda k: (k[0] != 'belongs_to_module', k[0], k[1])):
             label = self._RELATION_LABELS.get(key, f"{key[0].replace('_', ' ').capitalize()} ({key[1]})")
             items = ''.join(
@@ -145,12 +293,29 @@ class DocumentViewerWindow(QMainWindow):
                 f'{html.escape(r["other_title"])}</a> <i>({html.escape(registry.label(r["other_type"]))})</i></li>'
                 for r in sections[key])
             parts.append(f"<h4>{html.escape(label)}</h4><ul>{items}</ul>")
+        if not parts:
+            return None
 
         browser = QTextBrowser()
         browser.setOpenLinks(False)
         browser.setHtml(''.join(parts))
         browser.anchorClicked.connect(self._on_connection_clicked)
         return browser
+
+    def _refresh_connections_tab(self):
+        """Rebuild the Connections tab (after a save: new links in the text show up at once)."""
+        index = next((i for i in range(self.tab_widget.count()) if self.tab_widget.tabText(i) == "Connections"), -1)
+        was_current = index >= 0 and self.tab_widget.currentIndex() == index
+        if index >= 0:
+            old = self.tab_widget.widget(index)
+            self.tab_widget.removeTab(index)
+            old.deleteLater()
+        fresh = self._build_connections_tab()
+        if fresh is not None:
+            at = index if index >= 0 else min(2, self.tab_widget.count())
+            self.tab_widget.insertTab(at, fresh, "Connections")
+            if was_current:
+                self.tab_widget.setCurrentIndex(at)
 
     def _on_connection_clicked(self, url):
         if self.main_window is not None and hasattr(self.main_window, '_handle_internal_link'):
@@ -169,8 +334,8 @@ class DocumentViewerWindow(QMainWindow):
         header_layout.addWidget(self.entity_type_label)
         module_title = self._module_title()
         if module_title:
-            self.module_badge = QLabel(f"Module: {module_title}")
-            self.module_badge.setToolTip("The adventure module this entry belongs to")
+            self.module_badge = QLabel(f"Imported from: {module_title}")
+            self.module_badge.setToolTip("The adventure module file this entry was imported from")
             set_props(self.module_badge, role="accent")
             header_layout.addWidget(self.module_badge)
         header_layout.addStretch()
@@ -210,6 +375,13 @@ class DocumentViewerWindow(QMainWindow):
         self.title_edit = QLineEdit()
         self.title_edit.textChanged.connect(self._on_title_changed)
         info_layout.addWidget(self.title_edit)
+
+        # The adventure modules this entry belongs to (none, one or several)
+        if self.document.entity_type != 'module':
+            info_layout.addWidget(QLabel("Modules"))
+            self.module_picker = ModulePickerButton(*self._module_choices())
+            self.module_picker.selection_changed.connect(self._on_session_field_changed)
+            info_layout.addWidget(self.module_picker)
 
         # Session-specific fields (if entity type is session)
         if get_registry().has_capability(self.document.entity_type, CAP_SESSION):
@@ -273,6 +445,9 @@ class DocumentViewerWindow(QMainWindow):
             module_id=self.document.module_id
         )
         self.content_edit.textChanged.connect(self._on_content_changed)
+        self._offered_names = set()      # names already offered as new entries while this window is open
+        self._skip_name_offer = False
+        self._setup_name_completion()
 
         # Connect internal link signal to MainWindow's handler
         if self.main_window and hasattr(self.main_window, '_handle_internal_link'):
@@ -350,6 +525,16 @@ class DocumentViewerWindow(QMainWindow):
             self.stt_button.setEnabled(False)
             self.stt_button.setToolTip(mic_reason)
         bottom_layout.addWidget(self.stt_button)
+
+        self.history_btn = QPushButton("History...")
+        self.history_btn.setToolTip("Earlier versions of this entry (each save keeps the text it replaces)")
+        self.history_btn.clicked.connect(self._on_history)
+        bottom_layout.addWidget(self.history_btn)
+        self.map_btn = QPushButton("Map...")
+        self.map_btn.setToolTip("What this entry is connected to, as a map")
+        self.map_btn.clicked.connect(self._on_map)
+        self.map_btn.setVisible(self.main_window is not None and hasattr(self.main_window, '_show_relationship_map'))
+        bottom_layout.addWidget(self.map_btn)
 
         bottom_layout.addStretch()
 
@@ -531,6 +716,8 @@ class DocumentViewerWindow(QMainWindow):
             )
 
             if success:
+                if hasattr(self, 'module_picker'):
+                    self.db.set_document_modules(self.document.id, self.module_picker.selected_ids())
                 # Save images if the image gallery exists
                 if hasattr(self, 'image_gallery'):
                     image_save_success = self.image_gallery.save_images(self.document.id)
@@ -540,6 +727,8 @@ class DocumentViewerWindow(QMainWindow):
                 self.statusBar().showMessage(f"Saved: {self.document.title}")
                 # Reset dirty flag after successful save
                 self._is_dirty = False
+                if hasattr(self.content_edit, 'forget_names'):
+                    self.content_edit.forget_names()
                 # Refresh the parent widget's data
                 if hasattr(self.parent(), 'refresh_data'):
                     # SessionWidget uses refresh_data()
@@ -559,6 +748,8 @@ class DocumentViewerWindow(QMainWindow):
                         self.parent()._load_entity_documents(self.document.entity_type)
                     except Exception as e:
                         self.logger.warning(f"Could not refresh parent document list: {e}")
+                self._refresh_connections_tab()
+                self._offer_new_names()
             else:
                 show_warning(
                     self,

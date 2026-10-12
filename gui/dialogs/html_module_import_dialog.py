@@ -112,7 +112,7 @@ class HtmlModuleImportDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         self.guide_button = buttons.addButton("Format guide...", QDialogButtonBox.ButtonRole.HelpRole)
-        self.guide_button.setToolTip("How to write an HTML module the app can import (also in Help > HTML Module Guide)")
+        self.guide_button.setToolTip("How to write an HTML module the app can import (also in Help > Guides)")
         self.guide_button.clicked.connect(lambda: open_html_module_guide(self))
         self.import_button = buttons.addButton("Import", QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.accepted.connect(self._do_import)

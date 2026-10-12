@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.components.entity_list import ThumbnailLoader, draw_picture, is_dark, name_hue
+from utils.natural_sort import natural_key
 
 ROLE_RESULT = Qt.ItemDataRole.UserRole
 MAX_ENTITY_RESULTS = 8
@@ -158,7 +159,7 @@ class CommandPalette(QDialog):
                 rank = 2
             else:
                 continue
-            ranked.append((rank, lowered, document))
+            ranked.append((rank, natural_key(title), document))
         ranked.sort(key=lambda entry: (entry[0], entry[1]))
         return [document for _rank, _title, document in ranked[:MAX_ENTITY_RESULTS]]
 

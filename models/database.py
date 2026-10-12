@@ -24,7 +24,7 @@ class DatabaseManager:
     convenient methods for common database operations.
     """
 
-    SCHEMA_VERSION = 10
+    SCHEMA_VERSION = 11
 
     def __init__(self, db_path: Optional[str] = None):
         """
@@ -240,6 +240,18 @@ class DatabaseManager:
             )
         """)
 
+        # Earlier versions of an entry (the last few, text only): History in the editor
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS document_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT,
+                saved_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
+            )
+        """)
+
         # Images table - image storage and metadata
         conn.execute("""
             CREATE TABLE IF NOT EXISTS images (
@@ -325,6 +337,7 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_relationships_from ON document_relationships(from_document_id)",
             "CREATE INDEX IF NOT EXISTS idx_relationships_to ON document_relationships(to_document_id)",
             "CREATE INDEX IF NOT EXISTS idx_relationships_type ON document_relationships(relationship_type)",
+            "CREATE INDEX IF NOT EXISTS idx_versions_document ON document_versions(document_id)",
 
             # Images indexes
             "CREATE INDEX IF NOT EXISTS idx_images_module_id ON images(module_id)",
@@ -1385,9 +1398,11 @@ Notes:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    HISTORY_KEEP = 20       # earlier versions kept per entry
+
     def update_document(self, document_id: int, title: str, content: str,
-                          metadata: Optional[str] = None) -> bool:
-        """Update an existing document."""
+                          metadata: Optional[str] = None, record_history: bool = True) -> bool:
+        """Update an existing document. The text it had before is kept as an earlier version (see get_document_versions)."""
         # Import security utilities
         from utils.text_utils import TextUtils
         from utils.security_utils import get_security_validator
@@ -1417,6 +1432,15 @@ Notes:
 
         self.logger.debug(f"Updating document {document_id}: title='{title}', content_length={len(content)}")
         with self.connection.transaction() as conn:
+            if record_history:
+                before = conn.execute("SELECT title, content FROM documents WHERE id = ?", (document_id,)).fetchone()
+                if before is not None and (before[0] != title or (before[1] or '') != (content or '')) and (before[1] or '').strip():
+                    conn.execute("INSERT INTO document_versions (document_id, title, content) VALUES (?, ?, ?)",
+                                 (document_id, before[0], before[1]))
+                    conn.execute("""
+                        DELETE FROM document_versions WHERE document_id = ? AND id NOT IN (
+                            SELECT id FROM document_versions WHERE document_id = ? ORDER BY id DESC LIMIT ?)
+                    """, (document_id, document_id, self.HISTORY_KEEP))
             cursor = conn.execute("""
                 UPDATE documents
                 SET title = ?, content = ?, metadata = COALESCE(?, metadata),
@@ -1626,6 +1650,93 @@ Notes:
 
             log_database_operation("INSERT", "document_relationships", cursor.lastrowid)
             return cursor.lastrowid
+
+    def get_document_versions(self, document_id: int) -> List[Dict[str, Any]]:
+        """Earlier versions of an entry, newest first (id, title, content, saved_date)."""
+        with self.connection.transaction() as conn:
+            cursor = conn.execute("""
+                SELECT id, document_id, title, content, saved_date FROM document_versions
+                WHERE document_id = ? ORDER BY id DESC
+            """, (document_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    # --- adventure modules: which entries belong to which module (relationship 'belongs_to_module') -----------
+
+    def get_module_links(self, campaign_id: int) -> Dict[int, List[int]]:
+        """For every entry of a campaign: the ids of the module documents it belongs to (entries with none are absent)."""
+        with self.connection.transaction() as conn:
+            cursor = conn.execute("""
+                SELECT dr.from_document_id, dr.to_document_id
+                FROM document_relationships dr
+                JOIN documents d ON d.id = dr.from_document_id
+                WHERE dr.relationship_type = 'belongs_to_module' AND d.module_id = ?
+            """, (campaign_id,))
+            links: Dict[int, List[int]] = {}
+            for row in cursor.fetchall():
+                links.setdefault(row[0], []).append(row[1])
+            return links
+
+    def set_module_membership(self, document_ids: List[int], module_doc_id: int, member: bool) -> int:
+        """Add the entries to a module (member=True) or remove them from it. Returns how many entries changed."""
+        changed = 0
+        with self.connection.transaction() as conn:
+            for document_id in document_ids:
+                if document_id == module_doc_id:
+                    continue
+                if member:
+                    cursor = conn.execute("""
+                        INSERT OR IGNORE INTO document_relationships
+                        (from_document_id, to_document_id, relationship_type) VALUES (?, ?, 'belongs_to_module')
+                    """, (document_id, module_doc_id))
+                else:
+                    cursor = conn.execute("""
+                        DELETE FROM document_relationships
+                        WHERE from_document_id = ? AND to_document_id = ? AND relationship_type = 'belongs_to_module'
+                    """, (document_id, module_doc_id))
+                changed += cursor.rowcount if cursor.rowcount > 0 else 0
+        return changed
+
+    def set_document_modules(self, document_id: int, module_doc_ids: List[int]) -> None:
+        """Make an entry belong to exactly these modules."""
+        wanted = {int(m) for m in module_doc_ids if int(m) != document_id}
+        with self.connection.transaction() as conn:
+            current = {row[0] for row in conn.execute("""
+                SELECT to_document_id FROM document_relationships
+                WHERE from_document_id = ? AND relationship_type = 'belongs_to_module'
+            """, (document_id,)).fetchall()}
+            for module_doc_id in current - wanted:
+                conn.execute("""
+                    DELETE FROM document_relationships
+                    WHERE from_document_id = ? AND to_document_id = ? AND relationship_type = 'belongs_to_module'
+                """, (document_id, module_doc_id))
+            for module_doc_id in wanted - current:
+                conn.execute("""
+                    INSERT OR IGNORE INTO document_relationships
+                    (from_document_id, to_document_id, relationship_type) VALUES (?, ?, 'belongs_to_module')
+                """, (document_id, module_doc_id))
+
+    def set_documents_faction(self, document_ids: List[int], faction_id: Optional[int]) -> int:
+        """Give several entries the same faction (None clears it). Other metadata is kept. Returns how many changed."""
+        changed = 0
+        with self.connection.transaction() as conn:
+            for document_id in document_ids:
+                row = conn.execute("SELECT metadata FROM documents WHERE id = ?", (document_id,)).fetchone()
+                if row is None:
+                    continue
+                try:
+                    metadata = json.loads(row[0]) if row[0] else {}
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+                except (TypeError, ValueError):
+                    metadata = {}
+                if faction_id is None:
+                    metadata.pop('faction_id', None)
+                else:
+                    metadata['faction_id'] = faction_id
+                conn.execute("UPDATE documents SET metadata = ?, modified_date = CURRENT_TIMESTAMP WHERE id = ?",
+                             (json.dumps(metadata), document_id))
+                changed += 1
+        return changed
 
     def check_database_integrity(self) -> Dict[str, Any]:
         """Check database integrity and return status."""

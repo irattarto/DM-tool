@@ -63,8 +63,8 @@ def test_main_window_shows_module_column_and_menu(app, imported):
     try:
         tree = window.entity_lists['npc']
         labels = [tree.headerItem().text(i) for i in range(tree.columnCount())]
-        assert labels[-1] == 'Module'
-        titles = {tree.topLevelItem(i).text(0): tree.topLevelItem(i).text(len(labels) - 1)
+        assert labels[-2] == 'Module' and labels[-1] == 'Last seen'
+        titles = {tree.topLevelItem(i).text(0): tree.topLevelItem(i).text(labels.index('Module'))
                   for i in range(tree.topLevelItemCount())}
         assert titles['Big Boss'] == 'Test Pass'
         assert window.entity_lists['module'].topLevelItemCount() == 1
@@ -82,7 +82,7 @@ def test_viewer_shows_badge_connections_and_keeps_metadata_on_save(app, imported
     before = json.loads(boss['metadata'])
     viewer = DocumentViewerWindow(Document.from_dict(dict(boss)), db)
     try:
-        assert viewer.module_badge.text() == "Module: Test Pass"
+        assert viewer.module_badge.text() == "Imported from: Test Pass"
         tabs = [viewer.tab_widget.tabText(i) for i in range(viewer.tab_widget.count())]
         assert "Connections" in tabs
         viewer._on_save()

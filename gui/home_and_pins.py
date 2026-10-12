@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QTreeWidgetItem
 from config.entity_types import CAP_FACTION_LINK, get_registry
 from gui.components.entity_list import ROLE_DOC, ROLE_ROW, name_hue
 from utils.entity_metadata_extractor import extract_npc_metadata, format_date
+from utils.natural_sort import natural_key
 
 PINS_KEY = "pins_{module_id}"   # app_meta key holding the pinned document ids of one campaign (JSON list)
 RECENT_ENTRIES = 6
@@ -118,7 +119,8 @@ class HomeAndPinsMixin:
             return
         registry = get_registry()
         documents = [d for d in self.db.get_document_summaries(self.current_module_id)
-                     if d['id'] not in self._pending_deletes]  # no texts: Home only needs titles and dates
+                     if d['id'] not in self._pending_deletes
+                     and self._in_scope(d['id'], d['entity_type'])]  # no texts: Home only needs titles and dates
         by_type: Dict[str, List[dict]] = {}
         for document in documents:  # newest first
             by_type.setdefault(document['entity_type'], []).append(document)
@@ -137,14 +139,14 @@ class HomeAndPinsMixin:
                 continue
             people_label = people_label or self.entity_types[entity_type]
             for person in self.db.get_documents(self.current_module_id, entity_type):
-                if person['id'] not in self._pending_deletes:
+                if person['id'] not in self._pending_deletes and self._in_scope(person['id'], entity_type):
                     name = self._faction_name_of(person, faction_titles, known_factions)
                     if name:
                         member_counts[name.casefold()] += 1
         faction_docs = by_type.get('faction', []) if 'faction' in self.entity_types else []
         faction_rows = []
         for document in sorted(faction_docs, key=lambda d: (-member_counts.get(d['title'].casefold(), 0),
-                                                            d['title'].casefold()))[:MAX_FACTIONS]:
+                                                            natural_key(d['title'])))[:MAX_FACTIONS]:
             count = member_counts.get(document['title'].casefold(), 0)
             faction_rows.append({'doc': document, 'label': f"{count} {people_label or 'members'}"})
 
@@ -179,7 +181,32 @@ class HomeAndPinsMixin:
                             when=format_date(d.get('modified_date'))) for d in recent],
             'factions': [dict(row, **entry(row['doc'])) for row in faction_rows],
             'sessions': sessions,
+            'attention': self._attention_lines(),
+            'unused': self._unused_entries(),
         })
+
+    def _attention_lines(self) -> List[str]:
+        """One line per kind of problem the health check found (empty when everything is fine)."""
+        if not self.automation_enabled('auto_health_card'):
+            return []
+        try:
+            issues = self._health_issues()
+        except Exception as e:
+            self.logger.warning(f"Health check failed: {e}")
+            return []
+        lines = [f"{issue.title}" for issue in issues if issue.kind != 'duplicate']
+        duplicates = sum(1 for issue in issues if issue.kind == 'duplicate')
+        if duplicates:
+            lines.append(f"{duplicates} possible duplicate{'s' if duplicates != 1 else ''}")
+        return lines
+
+    def _unused_entries(self) -> List[dict]:
+        """People and places mentioned in an early session but in none of the last few."""
+        from services.health_service import not_used_for_a_while
+        if not self.automation_enabled('auto_health_card'):
+            return []
+        found = not_used_for_a_while(self._get_link_graph(), limit=5)
+        return [{'doc': doc, 'label': f"last seen: {title}"} for doc, title in found if self._in_scope(doc['id'], doc['entity_type'])]
 
     @staticmethod
     def _faction_name_of(person: dict, faction_titles: Dict[int, str], known_factions: set) -> str:

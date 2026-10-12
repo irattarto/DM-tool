@@ -5,6 +5,34 @@ All notable changes to RPG Database Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.9.0-beta.1] - 2026-10-12
+
+Pre-release: adventure modules as filters, entity files (import and export), Tab completion and the other helpers below. The database schema is now v11.
+
+### Added
+- **Adventure modules as a filter.** An entry can belong to no module, one module or several (the links are the `belongs_to_module` relationships the HTML import already makes; no change for existing data). The **Scope** button in the top bar limits every list, the Sessions page, Home, the counts and Ctrl+K to chosen modules or to "No module"; each list also has its own **Module** box. The editor has a **Modules** field. In a list, select several rows (Ctrl/Shift+click) and right-click: **Add to module**, **Remove from module** (with **New module...**) and, for people, **Set faction**.
+- **File > Import Entities...**: NPCs, factions, locations, items, quests, events and sessions from a Markdown file (front matter, `## NPC: Name {#id}` blocks with property lines and text), a JSON file (`dm-entities`) or HTML cards. A preview shows what is new, changed or unchanged, and where the entries go: the modules named in the file, one module you choose, a new module, or none. A re-import recognises entries by `pack` + id (by type and title when there is no id), keeps what you edited in the app, and never overwrites an entry made by hand unasked. `[text](#id)` and `[[Title]]` become real links; pictures come from the file's folder. Pictures, sessions (date, status, participants) and factions work too.
+- **File > Export Entities...** (and **Export as entity file...** on selected rows): saves entries as a Markdown or JSON entity file with their faction, tags, modules, session details and links between them, and copies their main pictures to an `images` folder. The file imports again, also into another campaign; into the same campaign the entries are matched by title and never duplicated.
+- **Guides** (Help menu, F1): the window now has two tabs, "HTML module" and "Entity file" (`docs/entity_file_guide.md`), with **Save example as...** for Markdown, JSON and HTML. The examples are part of the installation (`tools/entity_files/`).
+- **Tab completion of names.** While you type, grey text completes the name of an entry; **Tab** accepts it and makes it a link, **Esc** ignores it, and several matches open a small list. Select text and right-click for **Create entry from selection**.
+- **Connections without typing.** The Connections tab shows **Mentioned in** (who links to this entry) and, for a session, **Cast and places**. Lists have a sortable **Last seen** column (the latest session that mentions the entry) and the preview shows it.
+- **New names found.** After saving, capitalised names that match no entry are offered as new entries (NPC, location, faction...), linked in the text; "Never" stops asking about a name.
+- **Health check** (Tools menu, and "Needs attention" / "Not used for a while" on Home): people without a faction, entries without a picture, entries linked to nothing, possible duplicates (with **Merge**, which moves text, links, pictures and modules to the kept entry), and entries missing from the last sessions.
+- **Quick capture (Ctrl+Space)**: one line is added to the current session with the time, and the names in it are linked.
+- **Relationship map** (Map... in the editor, or right-click a row): the entry in the middle and what it is connected to around it; click to move around.
+- **History**: each save keeps the text it replaces (the last 20 per entry); History... in the editor previews and restores a version. This is stored data: the database schema is now **v11** (a migration with an automatic copy runs on first start; older program versions can no longer open the database).
+- **Automatic backup** when the program closes (the last 7 are kept in `auto_backups` next to the database; skipped when a backup is less than 30 minutes old).
+- **Tools > Automation** switches name suggestions, new-name offers, the Home attention cards and the backup on or off.
+
+### Changed
+- The health check looks at real entries only (not abilities or inventory items), and "Guard 1" / "Guard 2" are not reported as duplicates ("Name (1)" / "Name (2)" are).
+- Help > HTML Module Guide is now **Help > Guides (HTML module, entity file)**. The badge in the editor reads "Imported from: ..." (the module file an entry came from); the **Modules** field shows what it belongs to.
+
+### Fixed
+- Names that contain numbers sort by the number's value: "1, 2, 3, 9, 10" instead of "1, 10, 2, 3, 9", and "Session 2" before "Session 10". This applies to the entity lists (also their group headings and the faction column), the Sessions page, the factions on Home, the search results and the Discord picker. Sorting also ignores accents now, so names such as "Ágnes" or "Åsa" no longer end up after "Z".
+
 ## [1.8.0] - 2026-10-12
 
 ### Added

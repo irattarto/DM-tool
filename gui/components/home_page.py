@@ -32,6 +32,7 @@ class HomePage(QScrollArea):
 
     go_to = pyqtSignal(str)        # key of a sidebar page
     open_entry = pyqtSignal(dict)  # a document
+    health_requested = pyqtSignal()   # the "Needs attention" card was clicked
 
     def __init__(self, loader: ThumbnailLoader, parent=None):
         super().__init__(parent)
@@ -85,6 +86,12 @@ class HomePage(QScrollArea):
             side.addWidget(self._card("Factions", faction_rows, ""))
         side.addWidget(self._card("Recent sessions", [self._session_row(s) for s in data.get('sessions', [])],
                                   "No sessions yet."))
+        attention = [self._text_row(line) for line in data.get('attention', [])]
+        if attention:
+            side.addWidget(self._card("Needs attention", attention, ""))
+        unused = [self._unused_row(e) for e in data.get('unused', [])]
+        if unused:
+            side.addWidget(self._card("Not used for a while", unused, ""))
         side.addStretch(1)
         columns.addLayout(side, 2)
         self._layout.addLayout(columns)
@@ -166,6 +173,25 @@ class HomePage(QScrollArea):
         when.setEnabled(False)
         layout.addWidget(when)
         row.clicked.connect(lambda: self.go_to.emit('sessions'))
+        return row
+
+    def _text_row(self, text: str) -> QWidget:
+        row = self._row_frame(28)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(QLabel(text), 1)
+        row.clicked.connect(self.health_requested.emit)
+        return row
+
+    def _unused_row(self, entry: dict) -> QWidget:
+        row = self._row_frame(30)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(QLabel(entry['doc']['title']), 1)
+        seen = QLabel(entry['label'])
+        seen.setEnabled(False)
+        layout.addWidget(seen)
+        row.clicked.connect(lambda doc=entry['doc']: self.open_entry.emit(doc))
         return row
 
     def _make_tile(self, tile: dict) -> QWidget:

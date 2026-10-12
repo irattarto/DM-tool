@@ -47,7 +47,7 @@ def test_the_no_entities_warning_points_to_the_in_app_guide(tmp_path):
 
     page = tmp_path / "empty.html"
     page.write_text("<html><body><h1>Nothing</h1><p>text</p></body></html>", encoding="utf-8")
-    assert any("Help > HTML Module Guide" in w for w in parse_file(page).warnings)
+    assert any("Help > Guides" in w for w in parse_file(page).warnings)
 
 
 def test_the_guide_window_lists_the_sections_and_finds_text(app):
@@ -118,7 +118,7 @@ def test_help_menu_and_import_window_open_the_guide(app, tmp_path):
     window = MainWindow(settings, db)
     try:
         help_actions = {a.text(): a for a in window.menuBar().actions()[-1].menu().actions()}
-        assert help_actions["&HTML Module Guide..."].shortcut().toString() == "F1"
+        assert help_actions["&Guides (HTML module, entity file)..."].shortcut().toString() == "F1"
 
         dialog = HtmlModuleImportDialog(HtmlModuleImportService(db), parse_file(TEMPLATE), module_id, "Guide")
         try:
