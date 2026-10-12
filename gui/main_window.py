@@ -216,6 +216,12 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
+        guide_action = QAction("&HTML Module Guide...", self)
+        guide_action.setShortcut("F1")
+        guide_action.setStatusTip("How to write an HTML module the app can import")
+        guide_action.triggered.connect(self._on_html_module_guide)
+        help_menu.addAction(guide_action)
+
         shortcuts_action = QAction("&Keyboard Shortcuts", self)
         shortcuts_action.triggered.connect(self._on_shortcuts)
         help_menu.addAction(shortcuts_action)

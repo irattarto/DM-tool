@@ -4,6 +4,9 @@
 Temple Dungeons toolchain. This page describes what the importer looks for, so the format can keep
 evolving without breaking imports.
 
+For people writing modules, the readable rules are in [html_module_guide.md](html_module_guide.md)
+(also in the app: Help > HTML Module Guide). This page is the importer reference for developers.
+
 Check a file without opening the app:
 
 ```

@@ -190,7 +190,7 @@ A **campaign** is the top-level container you choose at startup. A **module** is
 2. The preview lists the module, its sessions, NPCs, factions, locations, items and events. Untick anything you do not want; options let you skip pictures or image prompts.
 3. Click **Import**. Everything is tagged with its module (Module column in the lists, badge and **Connections** tab in each document), NPCs are linked to their factions and to the sessions they appear in, and cross references in the text become clickable links.
 
-Importing the same file again updates the existing documents instead of duplicating them. Documents you edited yourself are shown as "edited here" and are left alone unless you tick them. Details of the format: `docs/html_module_format.md`.
+Importing the same file again updates the existing documents instead of duplicating them. Documents you edited yourself are shown as "edited here" and are left alone unless you tick them. How to write a module file the app can import: **Help > HTML Module Guide...** (F1), or the **Format guide...** button in the import window. The guide window can also save a copy of the guide and a ready-made example module. Importer reference for developers: `docs/html_module_format.md`.
 
 ## Module Management
 

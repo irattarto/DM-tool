@@ -277,6 +277,11 @@ class ShellMixin:
                 self.entity_lists[entity_type].scrollToItem(item)
         self._open_document_window(Document.from_dict(document))
 
+    def _on_html_module_guide(self):
+        """Help > HTML Module Guide (F1): the rules for writing an importable HTML module."""
+        from gui.dialogs.html_module_guide import open_html_module_guide
+        open_html_module_guide(self)
+
     def _on_shortcuts(self):
         """Help > Keyboard Shortcuts."""
         rows = "".join(f"<tr><td><b>{keys}</b>&nbsp;&nbsp;</td><td>{what}</td></tr>" for keys, what in SHORTCUTS)

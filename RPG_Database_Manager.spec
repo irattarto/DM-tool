@@ -17,7 +17,10 @@ _ico = project_root / 'data' / 'icons' / 'app_icon.ico'  # generated from the PN
 ICON = str(_ico) if IS_WINDOWS and _ico.exists() else None
 
 datas = [(str(project_root / 'data'), 'data'), (str(project_root / 'README.md'), '.'),
-         (str(project_root / 'LICENSE'), '.')]
+         (str(project_root / 'LICENSE'), '.'),
+         # Help > HTML Module Guide reads these (and offers to save copies of them)
+         (str(project_root / 'docs' / 'html_module_guide.md'), 'docs'),
+         (str(project_root / 'tools' / 'html_module' / 'module_template.html'), 'tools/html_module')]
 binaries = []
 hiddenimports = ['PIL', 'cryptography']
 # keyring picks its backend at runtime (Secret Service / KWallet / Windows / macOS), so bundle them all

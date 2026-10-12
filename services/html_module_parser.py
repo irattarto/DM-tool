@@ -708,7 +708,7 @@ def parse_html(html: str, source_path: str = "") -> ParsedModule:
     if not module.entities and not module.sessions:
         module.warnings.append(
             'No entities or scenes found: give cards ids with the prefixes c- g- m- f- l- item- gift- pw- h- hook- j- '
-            '(see "HTML Module Creation Manual" in the README)')
+            '(see Help > HTML Module Guide)')
     warn_node = root.find(None, 'warn')
     notice = text_of(warn_node) if warn_node is not None else ''
     module.content = _compose_module_content(module, _section_prose(root, entity_nodes, session_nodes), notice)

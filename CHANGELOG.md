@@ -5,6 +5,16 @@ All notable changes to RPG Database Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **HTML Module Guide** (Help menu, F1; also the **Format guide...** button of the Import HTML Module window): the rules for writing an HTML module the app can import, with a quick start, examples for every kind of entry, factions, pictures, a table of what the import warnings mean, and a checklist. The window has a contents list and a find box, and can save a copy of the guide and a ready-made example module (`module_template.html`) to any folder. Both files are now part of the installation (`docs/html_module_guide.md`, `tools/html_module/module_template.html`).
+
+- **Linux install package (.deb)** in every release, next to the AppImage and the tar.gz: `sudo apt install ./rpg-database-manager_<version>_amd64.deb` installs the program into `/opt/rpg-database-manager`, adds the `rpg-database-manager` command and a menu entry with its icon, and pulls in the system libraries it needs. It is built by `packaging/linux/build_deb.py` (Python only, no dpkg needed). The release build checks it with `dpkg-deb`, installs it, starts it and removes it again before attaching it.
+
+### Changed
+- The long "HTML Module Creation Manual" moved from the README into the guide (the README links to it). The "No entities or scenes found" warning now points to Help > HTML Module Guide.
+
 ## [1.7.1] - 2026-10-12
 
 ### Fixed

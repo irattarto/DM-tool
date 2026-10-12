@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialo
                              QTreeWidget, QTreeWidgetItem, QVBoxLayout)
 
 from config.entity_types import get_registry
+from gui.dialogs.html_module_guide import open_html_module_guide
 from services.html_module_import_service import (ACTION_CONFLICT, ACTION_CREATE, ACTION_UNCHANGED,
                                                  ACTION_UPDATE, AUTO_FACTION_IDS, NEW_FACTION_PREFIX,
                                                  HtmlModuleImportService, ImportOptions, ImportPlan, ImportResult)
@@ -110,6 +111,9 @@ class HtmlModuleImportDialog(QDialog):
         layout.addWidget(self.summary)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.guide_button = buttons.addButton("Format guide...", QDialogButtonBox.ButtonRole.HelpRole)
+        self.guide_button.setToolTip("How to write an HTML module the app can import (also in Help > HTML Module Guide)")
+        self.guide_button.clicked.connect(lambda: open_html_module_guide(self))
         self.import_button = buttons.addButton("Import", QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.accepted.connect(self._do_import)
         buttons.rejected.connect(self.reject)

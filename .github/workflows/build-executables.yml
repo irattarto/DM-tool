@@ -181,6 +181,27 @@ jobs:
         run: |
           packaging/linux/build_appimage.sh
           tar czf RPG_Database_Manager-linux-x64.tar.gz -C dist rpg-database-manager
+      - name: Package (.deb for Debian, Ubuntu and Linux Mint)
+        run: python packaging/linux/build_deb.py --dist dist/rpg-database-manager --output .
+      - name: Check the .deb (dpkg accepts it, it installs, starts and removes cleanly)
+        run: |
+          deb=$(ls rpg-database-manager_*_amd64.deb)
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb" | head -30
+          sudo apt-get install -y "./$deb"
+          test -x /usr/bin/rpg-database-manager
+          test -f /usr/share/applications/rpg-database-manager.desktop
+          export QT_QPA_PLATFORM=offscreen HOME="$RUNNER_TEMP/deb-home"
+          mkdir -p "$HOME"
+          /usr/bin/rpg-database-manager &
+          pid=$!
+          sleep 12
+          kill -0 "$pid"   # still running after 12 s (the shell stops here when it is not)
+          echo "Installed program started and stayed running."
+          kill "$pid"
+          sudo apt-get remove -y rpg-database-manager
+          test ! -e /usr/bin/rpg-database-manager
+          echo "Package installed, ran and was removed."
       # Release builds go straight to the release; other runs keep a short-lived artifact
       - name: Attach the files to the release
         if: needs.plan.outputs.publish == 'true'
@@ -192,7 +213,7 @@ jobs:
         run: |
           flags=(); [ "$PRE" = true ] && flags+=(--prerelease)
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes "${flags[@]}" || true   # the other platform job may have created it already
-          gh release upload "$TAG" RPG_Database_Manager-x86_64.AppImage RPG_Database_Manager-linux-x64.tar.gz --clobber
+          gh release upload "$TAG" RPG_Database_Manager-x86_64.AppImage RPG_Database_Manager-linux-x64.tar.gz rpg-database-manager_*_amd64.deb --clobber
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: needs.plan.outputs.publish != 'true'
         with:
@@ -200,4 +221,5 @@ jobs:
           path: |
             RPG_Database_Manager-x86_64.AppImage
             RPG_Database_Manager-linux-x64.tar.gz
+            rpg-database-manager_*_amd64.deb
           retention-days: 3
