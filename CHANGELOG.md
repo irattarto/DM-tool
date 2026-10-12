@@ -5,7 +5,7 @@ All notable changes to RPG Database Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] - 2026-10-12
 
 ### Added
 - **HTML Module Guide** (Help menu, F1; also the **Format guide...** button of the Import HTML Module window): the rules for writing an HTML module the app can import, with a quick start, examples for every kind of entry, factions, pictures, a table of what the import warnings mean, and a checklist. The window has a contents list and a find box, and can save a copy of the guide and a ready-made example module (`module_template.html`) to any folder. Both files are now part of the installation (`docs/html_module_guide.md`, `tools/html_module/module_template.html`).
