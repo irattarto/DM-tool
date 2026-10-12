@@ -7,15 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-12 (pre-release 1.9.0-beta.2)
+
+Pre-release: adventure modules as filters, entity files (import and export), places inside places, quests in HTML modules, Tab completion and the other helpers below. The database schema is now v11.
+
 ### Added
 - **Quests in HTML modules.** The importer now reads quest cards: ids starting with `q-` become quests and `goal-` becomes a quest with the subtype "goal" (they appear in the Quests list, are linked to the people and places they mention, and show in the import preview). The HTML Module Guide has a new "Quests and goals" part (how to write the goal, who gives it, the reward and the status), a checklist line and an example in the module template. Quests that were only prose in an earlier module are not imported; they need a card.
 
 - **Places inside places.** A location can be **Located in** another location (a street in a district, a district in a city, a road...). Set it in the editor, or select places and right-click > **Set 'Located in'**. The locations list has a **Located in** column (sortable), **Group by: Located in** (headers show the whole path, e.g. "Chicago > Downtown"), a **Located in** filter box (shows everything inside the chosen place, at any depth) and the second line of each row says where the place is. Entity files have a `located_in` property; no database change (a `located_in` relationship).
 - **"+ Add new faction..."** at the end of the NPC editor's Faction box, **New faction...** in the right-click Set faction menu, and the entity import creates factions that the entries name but that do not exist yet (a checkbox in the preview). The editor's "Located in" box has "+ Add new place..." too.
-
-## [1.9.0] - 2026-10-12 (pre-release 1.9.0-beta.1)
-
-Pre-release: adventure modules as filters, entity files (import and export), Tab completion and the other helpers below. The database schema is now v11.
 
 ### Added
 - **Adventure modules as a filter.** An entry can belong to no module, one module or several (the links are the `belongs_to_module` relationships the HTML import already makes; no change for existing data). The **Scope** button in the top bar limits every list, the Sessions page, Home, the counts and Ctrl+K to chosen modules or to "No module"; each list also has its own **Module** box. The editor has a **Modules** field. In a list, select several rows (Ctrl/Shift+click) and right-click: **Add to module**, **Remove from module** (with **New module...**) and, for people, **Set faction**.
