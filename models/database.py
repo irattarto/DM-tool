@@ -898,9 +898,8 @@ Notes:
             per_type = {row['entity_type']: row['count'] for row in conn.execute(
                 "SELECT entity_type, COUNT(*) AS count FROM documents WHERE module_id = ? GROUP BY entity_type",
                 (module_id,))}
-            sessions = conn.execute(
-                "SELECT COUNT(*) AS count FROM game_sessions WHERE module_id = ?", (module_id,)).fetchone()['count']
-        return {'documents': per_type, 'sessions': sessions}
+        # Sessions are documents of type 'session' (that is what the Sessions page lists)
+        return {'documents': per_type, 'sessions': per_type.get('session', 0)}
 
     def get_module(self, module_id: int) -> Optional[Dict[str, Any]]:
         """Get a specific module by ID."""
@@ -1369,6 +1368,15 @@ Notes:
             self.logger.debug(f"Query found {len(results)} documents")
 
             return [dict(row) for row in results]
+
+    def get_document_summaries(self, module_id: int) -> List[Dict[str, Any]]:
+        """Documents of a module without their text, newest first: enough for overviews and cheap on big campaigns."""
+        with self.connection.transaction() as conn:
+            cursor = conn.execute("""
+                SELECT id, module_id, entity_type, title, metadata, created_date, modified_date, status
+                FROM documents WHERE module_id = ? ORDER BY modified_date DESC
+            """, (module_id,))
+            return [dict(row) for row in cursor.fetchall()]
 
     def get_document(self, document_id: int) -> Optional[Dict[str, Any]]:
         """Get a specific document by ID."""

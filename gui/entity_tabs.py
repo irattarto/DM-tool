@@ -36,6 +36,7 @@ class EntityTabsMixin:
         # Entity list view state per entity type: grouping, the documents on show, preview panels
         self.entity_group_state: Dict[str, str] = {}
         self.entity_folded_groups: Dict[str, set] = {}
+        self._suspend_sidebar_counts = False
         self.entity_view_documents: Dict[str, tuple] = {}
         self.entity_previews: Dict[str, EntityPreviewPanel] = {}
         self.entity_sort_combos: Dict[str, QComboBox] = {}
@@ -297,9 +298,10 @@ class EntityTabsMixin:
         pin_filter = PinClickFilter(doc_tree)  # the star at the right of a row pins it for tonight
         pin_filter.pin_clicked.connect(self._on_pin_item)
         doc_tree.viewport().installEventFilter(pin_filter)
-        enter_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Return), doc_tree)
-        enter_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
-        enter_shortcut.activated.connect(lambda et=entity_type: self._open_current_entity(et))
+        for enter_key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):  # the main key and the keypad key
+            enter_shortcut = QShortcut(QKeySequence(enter_key), doc_tree)
+            enter_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+            enter_shortcut.activated.connect(lambda et=entity_type: self._open_current_entity(et))
         delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), doc_tree)
         delete_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
         delete_shortcut.activated.connect(lambda et=entity_type: self._on_delete_entity_document(et))
@@ -343,10 +345,18 @@ class EntityTabsMixin:
             return
 
         try:
+            # Entries still in the undo window belong to the campaign that was open: delete them now
+            if any(data.get('module_id') != self.current_module_id for _type, data in self._pending_deletes.values()):
+                self._flush_pending_deletes()
             self._load_pins()  # before the lists, so their rows know which entries are pinned
-            # Load documents for each entity type
-            for entity_type in self.entity_types.keys():
-                self._load_entity_documents(entity_type)
+            # Load documents for each entity type (the sidebar counts are refreshed once, at the end)
+            self._suspend_sidebar_counts = True
+            try:
+                for entity_type in self.entity_types.keys():
+                    self._load_entity_documents(entity_type)
+            finally:
+                self._suspend_sidebar_counts = False
+            self._refresh_sidebar_counts()
             self._refresh_pin_tray()
             if self.tab_widget.currentWidget() is self.home_tab:
                 self._refresh_home()
@@ -423,7 +433,8 @@ class EntityTabsMixin:
                 names.append('')  # entries without a value come last
             for name in names:
                 header = QTreeWidgetItem()
-                header.setData(0, ROLE_ROW, {'is_group': True, 'title': name or none_label, 'count': len(groups[name])})
+                header.setData(0, ROLE_ROW, {'is_group': True, 'key': name, 'title': name or none_label,
+                                             'count': len(groups[name])})
                 header.setFlags(Qt.ItemFlag.ItemIsEnabled)  # a header can be clicked but never selected
                 doc_tree.addTopLevelItem(header)
                 header.addChildren(groups[name])
@@ -518,7 +529,7 @@ class EntityTabsMixin:
             entity_type = next((et for et, tree in self.entity_lists.items() if tree is item.treeWidget()), None)
             if entity_type:
                 folded = self.entity_folded_groups.setdefault(entity_type, set())
-                name = info['title']
+                name = info.get('key', info['title'])  # '' for the group without a value, never its display title
                 folded.discard(name) if item.isExpanded() else folded.add(name)
 
     def _open_current_entity(self, entity_type: str):
@@ -770,6 +781,7 @@ class EntityTabsMixin:
         self._flush_pending_deletes()  # an earlier delete can no longer be undone
         self._pending_deletes[document_data['id']] = (entity_type, document_data)
         self._populate_entity_list(entity_type)
+        self._refresh_pin_tray()
         self.undo_toast.show_message(f"'{document_data['title']}' deleted", UNDO_SECONDS * 1000)
         self._pending_delete_timer.start(UNDO_SECONDS * 1000)
         self.status_bar.showMessage(f"Deleted {entity_type}: {document_data['title']}")
@@ -796,6 +808,10 @@ class EntityTabsMixin:
             failed.append((entity_type, document_data))
         for entity_type in {entity_type for entity_type, _ in failed}:
             self._populate_entity_list(entity_type)  # the entry is still in the database: show it again
+        if pending:
+            self._refresh_pin_tray()  # a pinned entry that is now really gone leaves the tray and the pin list
+            if hasattr(self, 'home_tab') and self.tab_widget.currentWidget() is self.home_tab:
+                self._refresh_home()
         if failed:
             show_warning(self, "Delete Failed", "Failed to delete: " + ", ".join(d['title'] for _, d in failed))
 
@@ -808,8 +824,30 @@ class EntityTabsMixin:
         self.undo_toast.dismiss()
         for entity_type in {entity_type for entity_type, _ in pending.values()}:
             self._populate_entity_list(entity_type)
-        restored = ", ".join(data['title'] for _, data in pending.values())
+        self._refresh_pin_tray()
+        restored =", ".join(data['title'] for _, data in pending.values())
         self.status_bar.showMessage(f"Restored: {restored}")
+
+    def _on_document_saved(self, entity_type: str):
+        """An editor window saved an entry: refresh what shows it (its list, the tray, Home, linked lists)."""
+        search = self.entity_search_widgets.get(entity_type)
+        text = search.text() if search is not None else ''
+        if text.strip():
+            self._on_entity_search(text, entity_type)   # keep the filter the user typed
+        else:
+            self._load_entity_documents(entity_type)
+        registry = get_registry()
+        if entity_type == 'faction':
+            # NPC rows show the faction's name, so they follow a rename
+            for other in self.entity_types:
+                if other != entity_type and registry.has_capability(other, CAP_FACTION_LINK):
+                    self._load_entity_documents(other)
+        if entity_type == 'session' and getattr(self, 'session_widget', None) is not None:
+            self.session_widget.refresh_data()
+        self._refresh_sidebar_counts()
+        self._refresh_pin_tray()
+        if hasattr(self, 'home_tab') and self.tab_widget.currentWidget() is self.home_tab:
+            self._refresh_home()
 
     def _create_blank_document(self, entity_type: str, title: str) -> Optional[int]:
         """Create a blank document without using a template."""

@@ -252,6 +252,7 @@ class DocumentViewerWindow(QMainWindow):
             except Exception as e:
                 self.logger.error(f"Failed to load factions for metadata tab: {e}")
 
+            self.faction_combo.currentIndexChanged.connect(self._on_session_field_changed)  # a faction change is unsaved too
             info_layout.addWidget(self.faction_combo)
 
         info_layout.addStretch(1)
@@ -546,6 +547,12 @@ class DocumentViewerWindow(QMainWindow):
                         self.parent().refresh_data()
                     except Exception as e:
                         self.logger.warning(f"Could not refresh parent data: {e}")
+                elif hasattr(self.parent(), '_on_document_saved'):
+                    # Main window: refreshes the list (keeping its filter), the tray, Home and linked lists
+                    try:
+                        self.parent()._on_document_saved(self.document.entity_type)
+                    except Exception as e:
+                        self.logger.warning(f"Could not refresh the lists: {e}")
                 elif hasattr(self.parent(), '_load_entity_documents'):
                     # Main window uses _load_entity_documents()
                     try:

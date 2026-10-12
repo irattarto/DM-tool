@@ -47,8 +47,10 @@ class PinTray(QFrame):
         """pins: [{'id', 'title', 'image', 'hue'}] in the order they were pinned."""
         while self.chips_layout.count():
             item = self.chips_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)  # gone from the strip at once, deleted when Qt gets to it
+                widget.deleteLater()
         if not pins:
             hint = QLabel("Pin entries with the star on a row to keep them here.")
             hint.setEnabled(False)

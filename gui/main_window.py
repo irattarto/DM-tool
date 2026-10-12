@@ -239,6 +239,7 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
     def _on_session_created(self, session_id: int):
         """Handle session creation."""
         self.status_bar.showMessage(f"Created session (ID: {session_id})")
+        self._refresh_sidebar_counts()
 
     def _update_session_widget_module(self, module_id: int):
         """Update the session widget with a new campaign ID."""
@@ -937,15 +938,18 @@ class MainWindow(HomeAndPinsMixin, ShellMixin, EntityTabsMixin, QMainWindow):
         try:
             tab_text = self.tab_widget.tabText(index)
             self.logger.debug(f"Tab changed to: {tab_text}")
+            self._refresh_sidebar_counts()  # sessions and entries may have changed on the page just left
 
-            if tab_text == "Home":
+            # Pages are told apart by the widget, not by their label (a custom entity type may be called "Home")
+            page = self.tab_widget.widget(index)
+            if page is getattr(self, 'home_tab', None):
                 self._refresh_home()
 
-            elif tab_text == "Templates":
+            elif page is getattr(self, 'templates_tab', None):
                 # Load templates when Templates tab is activated
                 self._load_templates()
 
-            elif tab_text == "Sessions":
+            elif page is getattr(self, 'sessions_tab', None):
                 # Session widget is now created during initialization
                 # Refresh data when tab is activated to ensure it's current
                 if hasattr(self, 'session_widget') and self.session_widget is not None:

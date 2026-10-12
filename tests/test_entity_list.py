@@ -156,6 +156,42 @@ def test_grouping_by_faction_and_module(app):
         window.deleteLater()
 
 
+def test_the_fold_state_of_the_group_without_a_value_survives_a_rebuild(app):
+    window, _db, _module, _ids = _window(NPCS)
+    try:
+        tree = window.entity_lists['npc']
+        window.entity_group_combos['npc'].setCurrentIndex(window.entity_group_combos['npc'].findData('faction'))
+        none_group = next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+                          if tree.topLevelItem(i).data(0, ROLE_ROW)['title'] == "No faction")
+        window._on_entity_item_clicked(none_group, 0)                      # fold "No faction"
+        assert not none_group.isExpanded()
+        window.entity_sort_combos['npc'].setCurrentIndex(1)               # any rebuild
+        none_group = next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+                          if tree.topLevelItem(i).data(0, ROLE_ROW)['title'] == "No faction")
+        assert not none_group.isExpanded()
+    finally:
+        window.deleteLater()
+
+
+def test_saving_in_the_editor_keeps_the_filter_and_updates_linked_lists(app):
+    window, db, module_id, ids = _window(NPCS)
+    try:
+        window.entity_search_widgets['npc'].setText("bor")                  # the user filters the list
+        assert _titles(window.entity_lists['npc']) == ["Borin"]
+        db.update_document(ids["Borin"], "Borin the Bold", "Name: Borin\nRace: Dwarf\nFaction: Iron Pact")
+        window._on_document_saved('npc')                                    # what the editor window calls after a save
+        assert _titles(window.entity_lists['npc']) == ["Borin the Bold"]    # renamed, and still filtered
+
+        window.entity_search_widgets['npc'].setText("")
+        faction = db.get_document(ids["Iron Pact"])
+        db.update_document(faction['id'], "Iron Covenant", faction['content'])
+        # NPCs name their faction in the text, so only the faction list changes here; the lists are rebuilt without errors
+        window._on_document_saved('faction')
+        assert "Iron Covenant" in _titles(window.entity_lists['faction'])
+    finally:
+        window.deleteLater()
+
+
 def test_delete_waits_for_undo_then_really_deletes(app):
     window, db, module_id, ids = _window(NPCS)
     try:

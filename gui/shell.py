@@ -39,6 +39,10 @@ class ShellMixin:
         """Put the sidebar next to the pages. The page widget keeps its tabs, but the sidebar replaces the tab bar."""
         self.sidebar = Sidebar()
         self.sidebar.view_selected.connect(self._on_sidebar_selected)
+        # After a click (or Enter) the keyboard goes to the page, so Enter, Delete and Ctrl+N work in its list.
+        # Arrow-key navigation inside the sidebar keeps the focus there.
+        self.sidebar.itemClicked.connect(lambda _item: self._focus_page())
+        self.sidebar.itemActivated.connect(lambda _item: self._focus_page())
         self.tab_widget.tabBar().hide()
         self.tab_widget.currentChanged.connect(self._sync_sidebar)
 
@@ -84,15 +88,17 @@ class ShellMixin:
         """(Re)build the sidebar entries: Sessions, one per visible entity type, Templates."""
         if not hasattr(self, 'sidebar') or not hasattr(self, 'home_tab'):
             return  # still starting up
-        entries: List[dict] = [{'kind': 'view', 'key': 'home', 'label': 'Home', 'icon': 'home', 'count': None},
+        entries: List[dict] = [{'kind': 'view', 'key': 'home', 'label': 'Home', 'icon': ICON_FOR_TYPE['home'], 'count': None},
                                {'kind': 'group', 'label': 'Play'},
-                               {'kind': 'view', 'key': 'sessions', 'label': 'Sessions', 'icon': 'play', 'count': None},
+                               {'kind': 'view', 'key': 'sessions', 'label': 'Sessions',
+                                'icon': ICON_FOR_TYPE['sessions'], 'count': None},
                                {'kind': 'group', 'label': 'World'}]
         for entity_type, label in self.entity_types.items():
             entries.append({'kind': 'view', 'key': entity_type, 'label': label,
                             'icon': ICON_FOR_TYPE.get(entity_type, 'square'), 'count': None})
         entries += [{'kind': 'group', 'label': 'Library'},
-                    {'kind': 'view', 'key': 'templates', 'label': 'Templates', 'icon': 'page', 'count': None}]
+                    {'kind': 'view', 'key': 'templates', 'label': 'Templates', 'icon': ICON_FOR_TYPE['templates'],
+                     'count': None}]
         self.sidebar.set_entries(entries, self._current_page_key())
         self._refresh_sidebar_counts()
 
@@ -100,6 +106,13 @@ class ShellMixin:
         page = self._page_for_key(key)
         if page is not None:
             self.tab_widget.setCurrentWidget(page)
+
+    def _focus_page(self):
+        """Give the keyboard to the list of the page just chosen."""
+        key = self._current_page_key()
+        tree = self.entity_lists.get(key) if key else None
+        if tree is not None:
+            tree.setFocus()
 
     def _sync_sidebar(self, _index: int = -1):
         """The page changed (sidebar, search or code): highlight its entry."""
@@ -109,7 +122,7 @@ class ShellMixin:
 
     def _refresh_sidebar_counts(self):
         """Show how many entries each type has, and the campaign status line."""
-        if not hasattr(self, 'sidebar') or not self.current_module_id:
+        if not hasattr(self, 'sidebar') or not self.current_module_id or self._suspend_sidebar_counts:
             return
         try:
             counts = self.db.get_module_counts(self.current_module_id)
@@ -251,6 +264,10 @@ class ShellMixin:
 
     def _open_palette_entry(self, document: dict):
         """Go to the entry's list, select it there, and open it."""
+        if 'content' not in document:  # Home passes summaries without the text
+            document = self.db.get_document(document['id'])
+            if not document:
+                return
         entity_type = document.get('entity_type')
         if entity_type in self.entity_tabs:
             self.tab_widget.setCurrentWidget(self.entity_tabs[entity_type])

@@ -26,8 +26,9 @@ def _window(docs=(), sessions=0):
     module_id = db.create_module("Greywood", "d")
     for entity_type, title, content in docs:
         db.create_document(module_id, entity_type, title, content)
-    for number in range(sessions):
-        db.create_session(module_id, "2026-10-1%d" % number, f"Session {number}", "notes")
+    for number in range(sessions):  # sessions are documents of type 'session' (what the Sessions page lists)
+        db.create_document(module_id, "session", f"Session {number}", "notes",
+                           metadata='{"session_date": "2026-10-1%d"}' % number)
     settings = Settings()
     settings.set_last_module_id(module_id)
     return MainWindow(settings, db), db, module_id
@@ -49,8 +50,8 @@ def test_database_counts(temp_db, sample_module):
     temp_db.create_document(sample_module, "npc", "A", "x")
     temp_db.create_document(sample_module, "npc", "B", "x")
     temp_db.create_document(sample_module, "quest", "Q", "x")
-    temp_db.create_session(sample_module, "2026-10-01", "S", "x")
-    assert temp_db.get_module_counts(sample_module) == {'documents': {'npc': 2, 'quest': 1}, 'sessions': 1}
+    temp_db.create_document(sample_module, "session", "S", "x")
+    assert temp_db.get_module_counts(sample_module) == {'documents': {'npc': 2, 'quest': 1, 'session': 1}, 'sessions': 1}
     assert temp_db.get_module_counts(9999) == {'documents': {}, 'sessions': 0}
 
 
@@ -81,6 +82,24 @@ def test_sidebar_and_pages_stay_in_step(app):
         assert window.sidebar.currentItem().data(ROLE_ENTRY)['key'] == 'templates'
         window.sidebar.setCurrentItem(window.sidebar._items['sessions'])    # the user clicks "Sessions"
         assert window.tab_widget.currentWidget() is window.sessions_tab
+    finally:
+        window.deleteLater()
+
+
+def test_clicking_a_sidebar_entry_gives_its_list_the_keyboard(app):
+    window, _db, _module = _window(DOCS)
+    try:
+        window.resize(1000, 600)
+        window.show()
+        window.activateWindow()
+        app.processEvents()
+        window.sidebar.setFocus()
+        window._on_sidebar_selected('faction')
+        window._focus_page()                       # what a click or Enter on the sidebar entry does
+        app.processEvents()
+        assert window.entity_lists['faction'].hasFocus()   # so Enter, Delete and Ctrl+N work right away
+        window._on_sidebar_selected('home')
+        window._focus_page()                       # pages without a list are left alone
     finally:
         window.deleteLater()
 

@@ -5,6 +5,23 @@ All notable changes to RPG Database Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-10-12
+
+### Fixed
+- Sessions were counted from the wrong place: the sidebar and the campaign status ("N sessions") and the Home page's recent sessions now use the same sessions as the Sessions page (newest game date first).
+- Pinned entries: a pinned entry that is deleted (or deleted and then undone) now leaves or returns to the Tonight tray at once, and its pin is removed for good when it is really deleted.
+- The Home entry in the sidebar had the wrong icon (a plain square instead of the house).
+- Changing an NPC's faction in the editor now counts as an unsaved change (the "Unsaved changes" marker and the question when closing).
+- A folded "No faction" / "No module" group stays folded when the list is rebuilt.
+- Enter (also the keypad key), Delete and Ctrl+N work right after choosing a page in the sidebar: a click or Enter on a sidebar entry gives the keyboard to its list.
+- Saving an entry in the editor refreshes everything that shows it (its list, keeping the filter you typed, the Tonight tray, Home, the sidebar counts, and the NPC lists after a faction is renamed).
+- A quick double-click on a row's pin star no longer opens the entry.
+- Home faction counts come from the database instead of the lists on screen, so a filter in a list or a delete waiting for Undo no longer changes them.
+- A delete waiting for Undo is carried out when you switch to another campaign, instead of following you into it.
+
+### Changed
+- Faster: the sidebar counts are refreshed once when a campaign is loaded (not once per list), and Home reads only titles and dates instead of the full text of every entry.
+
 ## [1.7.0] - 2026-10-12
 
 ### Added

@@ -36,7 +36,8 @@ def _window(db=None, module_id=None):
         module_id = db.create_module("Greywood", "d")
         for entity_type, title, content in DOCS:
             db.create_document(module_id, entity_type, title, content)
-        db.create_session(module_id, "2026-10-12", "Session 12", "notes")
+        db.create_document(module_id, "session", "Session 12", "notes", metadata='{"session_date": "2026-10-12"}')
+        db.create_document(module_id, "session", "Session 11", "notes", metadata='{"session_date": "2026-09-28"}')
     settings = Settings()
     settings.set_last_module_id(module_id)
     return MainWindow(settings, db), db, module_id
@@ -56,11 +57,12 @@ def test_window_starts_on_home_with_the_campaign_overview(app):
         assert window.tab_widget.currentWidget() is window.home_tab
         assert window.sidebar.currentItem().data(ROLE_ENTRY)['key'] == 'home'
         texts = _labels(window.home_tab)
-        assert "Greywood" in texts and "1 session · 6 entries" in texts
+        assert "Greywood" in texts and "2 sessions · 6 entries" in texts      # the sessions are counted as the Sessions page lists them
         assert {"NPCs", "Factions", "Locations"} <= set(texts)       # one tile per entity type
         assert "Aria's Tower" in texts and "Silver Guild" in texts    # recent activity
         assert "2 NPCs" in texts and "1 NPCs" in texts                # factions with their members
-        assert "Session 12" in texts                                  # recent sessions
+        assert texts.index("Session 12") < texts.index("Session 11")  # recent sessions, newest game date first
+        assert "2026-10-12" in texts
     finally:
         window.deleteLater()
 
@@ -115,6 +117,91 @@ def test_pins_are_stored_per_campaign_and_shown_in_the_tray(app):
         window.deleteLater()
 
 
+def test_pin_tray_follows_delete_undo_and_final_delete(app):
+    window, db, module_id = _window()
+    try:
+        borin = _doc(db, module_id, "Borin")
+        window._toggle_pin(borin['id'])
+        chips = lambda: [b.text() for b in window.pin_tray.chips_area.findChildren(QPushButton)]
+        assert "Borin" in chips()
+        window._schedule_entity_delete('npc', borin)
+        assert "Borin" not in chips() and window._pins == [borin['id']]      # hidden at once, still pinned for Undo
+        window._undo_pending_delete()
+        assert "Borin" in chips()
+        window._schedule_entity_delete('npc', borin)
+        window._flush_pending_deletes()                                       # really gone: the pin goes too
+        assert "Borin" not in chips() and window._pins == []
+    finally:
+        window.deleteLater()
+
+
+def test_pending_deletes_do_not_follow_a_switch_to_another_campaign(app):
+    window, db, module_id = _window()
+    try:
+        second = db.create_module("Winter Siege", "d")
+        aria = _doc(db, module_id, "Aria")
+        window._schedule_entity_delete('npc', aria)
+        window.current_module_id = second                                    # e.g. File > New Campaign
+        window._load_documents()
+        assert db.get_document(aria['id']) is None and not window._pending_deletes
+        assert window.sidebar._items['npc'].data(ROLE_ENTRY)['count'] == 0   # not "minus one"
+    finally:
+        window.deleteLater()
+
+
+def test_home_faction_counts_come_from_the_database_not_from_the_lists(app):
+    window, db, module_id = _window()
+    try:
+        window.entity_search_widgets['npc'].setText("cora")                 # the NPC list shows a single row now
+        window._refresh_home()
+        texts = _labels(window.home_tab)
+        assert "2 NPCs" in texts and "1 NPCs" in texts                      # Silver Guild has Aria and Cora, Iron Pact has Borin
+        window._schedule_entity_delete('npc', _doc(db, module_id, "Cora"))
+        window._refresh_home()
+        assert "2 NPCs" not in _labels(window.home_tab)                     # a delete waiting for Undo is not counted
+    finally:
+        window.deleteLater()
+
+
+def test_sidebar_icons_are_all_known_shapes(app):
+    from gui.components.sidebar import ICON_FOR_TYPE
+    window, _db, _module = _window()
+    try:
+        icons = {e['key']: e['icon'] for e in (window.sidebar.item(i).data(ROLE_ENTRY) for i in range(window.sidebar.count()))
+                 if e['kind'] == 'view'}
+        assert icons['home'] == 'house' and icons['sessions'] == 'play' and icons['templates'] == 'page'
+        assert set(ICON_FOR_TYPE.values()) >= {'house', 'play', 'page', 'circle', 'shield', 'diamond'}
+    finally:
+        window.deleteLater()
+
+
+def test_a_double_click_on_the_pin_star_pins_once_and_opens_nothing(app):
+    from PyQt6.QtCore import QEvent, QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    from gui.components.entity_list import PinClickFilter, pin_rect
+
+    window, db, module_id = _window()
+    try:
+        tree = window.entity_lists['npc']
+        window.resize(1000, 600)
+        window.tab_widget.setCurrentWidget(window.entity_tabs['npc'])
+        window.show()
+        app.processEvents()
+        item = window._find_entity_item(tree, _doc(db, module_id, "Aria")['id'])
+        point = QPointF(pin_rect(tree.visualItemRect(item)).center())
+        pin_filter = PinClickFilter(tree)
+        clicks = []
+        pin_filter.pin_clicked.connect(clicks.append)
+
+        def mouse(kind):
+            return QMouseEvent(kind, point, point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        assert pin_filter.eventFilter(tree.viewport(), mouse(QEvent.Type.MouseButtonPress)) is True
+        assert pin_filter.eventFilter(tree.viewport(), mouse(QEvent.Type.MouseButtonDblClick)) is True   # swallowed, no second pin
+        assert len(clicks) == 1
+    finally:
+        window.deleteLater()
+
+
 def test_pins_of_deleted_entries_disappear(app):
     window, db, module_id = _window()
     try:
@@ -160,6 +247,14 @@ def test_editor_window_layout(app):
             viewer._on_save()
             assert not viewer._is_dirty and viewer.unsaved_label.isHidden()
             assert db.get_document(viewer.document.id)['title'] == "Aria the Bold"
+            # a save refreshes the main window: the NPC list shows the new title
+            tree = window.entity_lists['npc']
+            assert "Aria the Bold" in [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+
+            # changing the faction is an unsaved change too
+            viewer.faction_combo.setCurrentIndex(1)
+            assert viewer._is_dirty and not viewer.unsaved_label.isHidden()
+            viewer._is_dirty = False
         finally:
             viewer._is_dirty = False
             viewer.deleteLater()

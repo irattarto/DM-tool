@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QTreeWidgetItem
 
 from config.entity_types import CAP_FACTION_LINK, get_registry
 from gui.components.entity_list import ROLE_DOC, ROLE_ROW, name_hue
-from utils.entity_metadata_extractor import format_date
+from utils.entity_metadata_extractor import extract_npc_metadata, format_date
 
 PINS_KEY = "pins_{module_id}"   # app_meta key holding the pinned document ids of one campaign (JSON list)
 RECENT_ENTRIES = 6
@@ -117,7 +117,8 @@ class HomeAndPinsMixin:
             self.home_tab.show_data({'name': '', 'status': 'Create or open a campaign to begin.'})
             return
         registry = get_registry()
-        documents = [d for d in self.db.get_documents(self.current_module_id) if d['id'] not in self._pending_deletes]
+        documents = [d for d in self.db.get_document_summaries(self.current_module_id)
+                     if d['id'] not in self._pending_deletes]  # no texts: Home only needs titles and dates
         by_type: Dict[str, List[dict]] = {}
         for document in documents:  # newest first
             by_type.setdefault(document['entity_type'], []).append(document)
@@ -125,25 +126,27 @@ class HomeAndPinsMixin:
         context_labels = {key: registry.label(key) for key in registry.keys_for('context')}
         recent = [d for d in documents if d['entity_type'] in context_labels][:RECENT_ENTRIES]
 
-        # Factions: every faction with the number of people that belong to it
-        faction_rows = []
-        people_label = ''
+        # Factions: every faction with the number of people that belong to it. Counted from the database,
+        # not from the lists, which a search box or a delete waiting for Undo can thin out.
+        faction_titles = {d['id']: d['title'] for d in by_type.get('faction', [])}
+        known_factions = {title.casefold() for title in faction_titles.values()}
         member_counts: Counter = Counter()
-        for entity_type, tree in self.entity_lists.items():
+        people_label = ''
+        for entity_type in self.entity_types:
             if not registry.has_capability(entity_type, CAP_FACTION_LINK):
                 continue
-            people_label = people_label or self.entity_types.get(entity_type, '')
-            for i in range(tree.topLevelItemCount()):
-                stack = [tree.topLevelItem(i)]
-                while stack:
-                    item = stack.pop()
-                    info = item.data(0, ROLE_ROW) or {}
-                    if item.data(0, ROLE_DOC) and info.get('faction'):
-                        member_counts[info['faction']] += 1
-                    stack.extend(item.child(c) for c in range(item.childCount()))
+            people_label = people_label or self.entity_types[entity_type]
+            for person in self.db.get_documents(self.current_module_id, entity_type):
+                if person['id'] not in self._pending_deletes:
+                    name = self._faction_name_of(person, faction_titles, known_factions)
+                    if name:
+                        member_counts[name.casefold()] += 1
         faction_docs = by_type.get('faction', []) if 'faction' in self.entity_types else []
-        for document in sorted(faction_docs, key=lambda d: (-member_counts.get(d['title'], 0), d['title'].casefold()))[:MAX_FACTIONS]:
-            faction_rows.append({'doc': document, 'label': f"{member_counts.get(document['title'], 0)} {people_label or 'members'}"})
+        faction_rows = []
+        for document in sorted(faction_docs, key=lambda d: (-member_counts.get(d['title'].casefold(), 0),
+                                                            d['title'].casefold()))[:MAX_FACTIONS]:
+            count = member_counts.get(document['title'].casefold(), 0)
+            faction_rows.append({'doc': document, 'label': f"{count} {people_label or 'members'}"})
 
         tiles = []
         needed = {d['id'] for d in recent}
@@ -156,8 +159,17 @@ class HomeAndPinsMixin:
         def entry(document):
             return {'doc': document, 'image': images.get(document['id']), 'hue': self._row_hue(document)}
 
-        sessions = [{'title': s['title'], 'date': str(s.get('session_date') or '')[:10]}
-                    for s in self.db.get_sessions(self.current_module_id)[:RECENT_SESSIONS]]
+        # Sessions are documents of type 'session', as on the Sessions page; newest game date first
+        played = []
+        for document in by_type.get('session', []):
+            try:
+                played_on = json.loads(document['metadata']).get('session_date') if document.get('metadata') else None
+            except (TypeError, ValueError, AttributeError):
+                played_on = None
+            played.append((str(played_on or ''), document['title']))
+        played.sort(reverse=True)
+        sessions = [{'title': title, 'date': date[:10]} for date, title in played[:RECENT_SESSIONS]]
+
         self.home_tab.show_data({
             'name': self._campaign_name,
             'status': self._campaign_status,
@@ -168,3 +180,16 @@ class HomeAndPinsMixin:
             'factions': [dict(row, **entry(row['doc'])) for row in faction_rows],
             'sessions': sessions,
         })
+
+    @staticmethod
+    def _faction_name_of(person: dict, faction_titles: Dict[int, str], known_factions: set) -> str:
+        """The faction of a person, by the same rules as the lists: the chosen faction, else a valid name in the text."""
+        if person.get('metadata'):
+            try:
+                faction_id = json.loads(person['metadata']).get('faction_id')
+            except (TypeError, ValueError, AttributeError):
+                faction_id = None
+            if faction_id is not None and faction_titles.get(faction_id):
+                return faction_titles[faction_id]
+        written = extract_npc_metadata(person.get('content', '')).get('faction')
+        return written if written and written.casefold() in known_factions else ''

@@ -323,12 +323,14 @@ class PinClickFilter(QObject):
         self.tree = tree
 
     def eventFilter(self, obj, event) -> bool:
-        if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+        press = event.type() == QEvent.Type.MouseButtonPress
+        if (press or event.type() == QEvent.Type.MouseButtonDblClick) and event.button() == Qt.MouseButton.LeftButton:
             point = event.position().toPoint()
             item = self.tree.itemAt(point)
             if item is not None and item.data(0, ROLE_DOC) and pin_rect(self.tree.visualItemRect(item)).contains(point):
-                self.pin_clicked.emit(item)
-                return True
+                if press:
+                    self.pin_clicked.emit(item)
+                return True  # a quick second click on the star must not open the entry either
         return False
 
 
@@ -443,8 +445,10 @@ class EntityPreviewPanel(QFrame):
 
         while self.details.count():
             item = self.details.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)  # gone at once, deleted when Qt gets to it
+                widget.deleteLater()
         for row, (label, value, color) in enumerate(rows):
             key = QLabel(label)
             key.setEnabled(False)
@@ -468,5 +472,7 @@ class EntityPreviewPanel(QFrame):
         if not visible:
             while self.details.count():
                 item = self.details.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+                    widget.deleteLater()
