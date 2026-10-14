@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-14
+
+The HTML module import can use entries the campaign already has, HTML modules can put a place inside another one (`data-located-in`), and entity files got a few fixes.
+
 ### Added
 - **HTML module import uses entries the campaign already has.** A card that no entry of the module has yet, and whose type and title match an existing NPC, faction, location, item, quest or character (letter case ignored), offers **Use existing** (default: its text is kept, it is added to the module, and the module's links and faction point to it), **Overwrite existing** or **Create new** in the preview. The choice is saved with the module, so a re-import finds the entry without asking. A same-named module faction becomes the existing faction; a picture, a faction or a "Located in" is only added when the entry has none, and a different faction is shown as a note. Scenes, sessions, gear and `g-` cards with `data-count` are never matched; of two cards with the same title only the first can use the entry (the preview warns about the second).
 - **`data-located-in="l-..."`** on a location card of an HTML module sets its "Located in" (as `located_in` does in entity files); an unknown target is a warning in the preview.

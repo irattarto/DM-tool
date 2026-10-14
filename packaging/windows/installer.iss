@@ -1,5 +1,5 @@
 ; Inno Setup script: wraps the PyInstaller onedir build into a per-user installer.
-; Build:  iscc /DAppVersion=1.9.0 packaging\windows\installer.iss   (run from the repository root)
+; Build:  iscc /DAppVersion=1.10.0 packaging\windows\installer.iss   (run from the repository root)
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"

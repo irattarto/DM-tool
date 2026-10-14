@@ -2,7 +2,7 @@
 
 A comprehensive desktop application for managing tabletop RPG campaigns with a flexible document-centric approach.
 
-![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.10.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)

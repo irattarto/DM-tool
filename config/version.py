@@ -2,8 +2,8 @@
 Version information for RPG Database Manager.
 """
 
-__version__ = "1.9.0"
-__version_info__ = (1, 9, 0)
+__version__ = "1.10.0"
+__version_info__ = (1, 10, 0)
 
 # Additional version metadata
 APP_NAME = "RPG Database Manager"
