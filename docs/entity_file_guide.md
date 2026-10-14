@@ -36,7 +36,7 @@ tags: Human, Strong
 The text of the entry.
 ```
 
-- The part between the two `---` lines is the **front matter**. It is optional, but `pack:` is strongly recommended.
+- The part between the two `---` lines is the **front matter**. It is optional, but `pack:` is strongly recommended. A line starting with `#` is a comment, and so is ` # ` (a `#` with a space before and after it) to the end of the line: `pack: my-pack  # the name` is `my-pack`, but `pack: Pack #2` is `Pack #2`.
 - Each entry starts with a line `## Type: Title {#id}`.
 - Directly under that line come the **property lines** (`key: value`), then an empty line, then the text. The first line that is not a property ends the properties.
 - A `##` line whose type word is not known is just part of the text of the entry above it. Use `###` or deeper for your own headings.
@@ -50,10 +50,11 @@ Write the type word as in the program, in any letter case: `NPC`, `Faction`, `Lo
 
 | Property | For | Meaning |
 |---|---|---|
-| `faction` | NPC, Character | Name of a faction: one in the file, or one that exists in the campaign. A faction that exists nowhere is created at the import (you can switch that off in the preview). |
+| `faction` | NPC, Character | Name of a faction: one in the file, or one that exists in the campaign. A faction that exists nowhere is created at the import (you can switch that off in the preview). `none`, `unknown` and `undecided` name no faction, as in the HTML import: nothing is created; `unknown` and `undecided` become the tag `faction: unknown` / `faction: undecided`. |
+| `subtype` | any | `minor`, `monster` (NPCs), `gift`, `spell`, `handout` (items), `goal` (quests), `hook` (characters) or `scene` (events). Stored like the subtype of the HTML import. Another value is a warning and is left out. |
 | `race` and any other `key: value` | any | Kept as a line `Key: value` at the top of the text (the lists read `Race:` from it). |
 | `located_in` | Location | Name of the place this place is inside: a street in a district, a district in a city. One in the file or in the campaign. |
-| `tags` | any | Comma separated words. |
+| `tags` | any | Comma separated words. Put an item with a comma in quotes: `modules: ["Raton Pass, 1. rész", Docks]` (the same for every list). |
 | `image` | any | Picture path, relative to the file (`images/boss.jpg`). It becomes the main picture. Only .jpg, .png and .webp inside the file's folder. |
 | `modules` | any | Modules of this entry (added to those in the front matter). |
 | `date` | Session | `YYYY-MM-DD`. Today if missing. |
@@ -87,13 +88,14 @@ Links become real links in the program. They also fill the **Mentioned in** list
 - *No entries found*: no line looked like `## NPC: Name`. Check the `##` and the colon.
 - *The id is used twice*: the second entry was skipped. Give it another id.
 - *Date / status not valid*: the value was replaced by the default.
+- *Subtype is not one of ...*: the subtype was left out. Use one of the words in section 5.
 - *Picture not found*: the file is not next to the entry file, or it is not a .jpg, .png or .webp.
 
 ## 10. Exporting entries
 
 **File > Export Entities...** saves entries as an entity file that this program (or another campaign) imports again. In a list, select rows (Ctrl+click, Shift+click) and use File > Export Entities..., or right-click them and choose **Export as entity file...**; with nothing selected the whole open list is exported. Choose Markdown (`.md`) or JSON (`.json`).
 
-- The file has the format of this guide: `pack`, one `## Type: Title {#id}` block per entry, with faction, tags, modules and, for sessions, date, status and participants.
+- The file has the format of this guide: `pack`, one `## Type: Title {#id}` block per entry, with subtype, faction, located in, tags, modules and, for sessions, date, status and participants.
 - Links between exported entries become `[text](#id)` links; links to entries that were not exported become plain text.
 - The main picture of each entry is copied to an `images` folder next to the file.
 - Importing the file into the **same** campaign finds the entries by title and lists them as "exists - overwrite?", so nothing is duplicated.

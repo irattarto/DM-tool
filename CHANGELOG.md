@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **HTML module import uses entries the campaign already has.** A card that no entry of the module has yet, and whose type and title match an existing NPC, faction, location, item, quest or character (letter case ignored), offers **Use existing** (default: its text is kept, it is added to the module, and the module's links and faction point to it), **Overwrite existing** or **Create new** in the preview. The choice is saved with the module, so a re-import finds the entry without asking. A same-named module faction becomes the existing faction; a picture, a faction or a "Located in" is only added when the entry has none, and a different faction is shown as a note. Scenes, sessions, gear and `g-` cards with `data-count` are never matched; of two cards with the same title only the first can use the entry (the preview warns about the second).
+- **`data-located-in="l-..."`** on a location card of an HTML module sets its "Located in" (as `located_in` does in entity files); an unknown target is a warning in the preview.
+- Entity files: a **`subtype:`** property (`minor`, `monster`, `gift`, `spell`, `handout`, `goal`, `hook`, `scene`), stored like the HTML import's subtype; Export Entities writes it.
+- `tools/html_module/validate_module.py` also warns about a `q-` card without a Goal/Status line, a `data-located-in` that points to no location card, and two cards with the same title.
+
+### Changed
+- Import Entities treats `faction: none`, `unknown` and `undecided` like the HTML import: no faction is created; `unknown` and `undecided` become the tag `faction: unknown` / `faction: undecided`.
+
+### Fixed
+- Entity files: a quoted list item keeps its comma (`modules: ["Raton Pass, 1. rész"]` is one module), and in the front matter `#` starts a comment only at the start of a line or as ` # `, so `pack: Pack #2` is no longer cut.
+
 ## [1.9.0] - 2026-10-12
 
 Adventure modules as filters, entity files (import and export), places inside places, quests in HTML modules, Tab completion and the other helpers below. The database schema is now v11.

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from services.html_module_import_service import (
-    ACTION_CONFLICT, ACTION_CREATE, ACTION_UNCHANGED, ACTION_UPDATE,
+    ACTION_CONFLICT, ACTION_CREATE, ACTION_UNCHANGED, ACTION_UPDATE, MATCH_NEW,
     HtmlModuleImportService, ImportOptions)
 from services.html_module_parser import parse_file, parse_html
 
@@ -200,6 +200,10 @@ def test_two_modules_in_one_campaign_stay_separate(temp_db, campaign, module_fil
     svc = HtmlModuleImportService(temp_db)
     svc.apply(svc.build_plan(parse_file(module_file), campaign))
     plan = svc.build_plan(parse_file(other), campaign)
+    matched = [i.source_id for i in plan.items if i.match_id is not None]       # same titles: offered as existing
+    assert set(matched) == {'f-guild', 'c-boss', 'c-loner', 'g-clerk', 'l-yard', 'item-key'}
+    plan = svc.build_plan(parse_file(other), campaign,
+                          ImportOptions(match_choices={sid: MATCH_NEW for sid in matched}))
     assert all(i.action == ACTION_CREATE for i in plan.items)
     svc.apply(plan)
     modules = temp_db.get_documents(campaign, 'module')

@@ -43,8 +43,14 @@ _WIKI_RE = re.compile(r'\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]')
 _IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
 _SESSION_STATUS = ('planned', 'active', 'played')
 _LIST_PROPS = ('tags', 'modules', 'participants')
-_SPECIAL_PROPS = ('faction', 'tags', 'image', 'modules', 'date', 'status', 'participants', 'id')
+_SPECIAL_PROPS = ('faction', 'tags', 'image', 'modules', 'date', 'status', 'participants', 'id', 'subtype')
 _TEXT_EXTS = ('.md', '.markdown', '.txt')
+# The subtypes the HTML module import stores (metadata 'subtype'): minor NPC, monster, gift, spell, ...
+SUBTYPES = ('minor', 'monster', 'gift', 'spell', 'handout', 'goal', 'hook', 'scene')
+# faction values that name no faction; 'unknown' and 'undecided' are kept as the tag "faction: ..."
+FACTION_STATES = ('none', 'unknown', 'undecided')
+# a front matter comment: a line starting with #, or " # " (a # with whitespace before and after) to the line end
+_COMMENT_RE = re.compile(r'^\s*#.*$|\s+#(?:\s.*)?$')
 
 
 def _hash(text: str) -> str:
@@ -68,13 +74,34 @@ def type_names() -> Dict[str, str]:
 
 
 def split_list(value) -> List[str]:
-    """"a, b" or "[a, b]" or a real list -> ['a', 'b']."""
+    """"a, b" or "[a, b]" or a real list -> ['a', 'b']. A quoted item keeps its commas: '"Raton Pass, 1. rész"'."""
     if isinstance(value, list):
         return [str(v).strip() for v in value if str(v).strip()]
     text = str(value or '').strip()
     if text.startswith('[') and text.endswith(']'):
         text = text[1:-1]
-    return [part.strip().strip('"\'') for part in text.split(',') if part.strip().strip('"\'')]
+    items: List[str] = []
+    index = 0
+    while index <= len(text):
+        while index < len(text) and text[index] in ' \t':
+            index += 1
+        quote = text[index] if index < len(text) and text[index] in '"\'' else ''
+        if quote:
+            # the closing quote is the one followed only by spaces up to a comma or the end
+            close = re.compile(re.escape(quote) + r'\s*(?:,|$)').search(text, index + 1)
+            if close:
+                item = text[index + 1:close.start()].strip()
+                if item:
+                    items.append(item)
+                index = close.end()
+                continue
+        end = text.find(',', index)
+        end = len(text) if end == -1 else end
+        item = text[index:end].strip().strip('"\'')
+        if item:
+            items.append(item)
+        index = end + 1
+    return items
 
 
 @dataclass
@@ -84,7 +111,9 @@ class EntityEntry:
     source_id: str = ''
     body: str = ''
     faction: str = ''
+    faction_state: str = ''                                 # 'faction: none|unknown|undecided' (then faction is '')
     located_in: str = ''                                    # title of the place this place is inside
+    subtype: str = ''                                       # one of SUBTYPES (stored as metadata 'subtype')
     tags: List[str] = field(default_factory=list)
     image: str = ''
     modules: List[str] = field(default_factory=list)
@@ -115,7 +144,7 @@ def _front_matter(text: str) -> Tuple[Dict[str, str], str]:
         if lines[end].strip() == '---':
             props = {}
             for line in lines[1:end]:
-                match = _PROP_RE.match(line.split('#', 1)[0].rstrip())
+                match = _PROP_RE.match(_COMMENT_RE.sub('', line).rstrip())
                 if match:
                     props[match.group(1).strip().casefold()] = match.group(2).strip()
             return props, '\n'.join(lines[end + 1:])
@@ -174,7 +203,10 @@ def _finish_entry(entry: EntityEntry, lines: List[str], parsed: ParsedEntityFile
 def _apply_property(entry: EntityEntry, key: str, value: str) -> None:
     low = key.casefold().replace(' ', '_')
     if low == 'faction':
-        entry.faction = value
+        state = value.casefold()
+        entry.faction, entry.faction_state = ('', state) if state in FACTION_STATES else (value, '')
+    elif low == 'subtype':
+        entry.subtype = value.casefold()
     elif low == 'located_in':
         entry.located_in = value
     elif low == 'tags':
@@ -208,6 +240,14 @@ def _check_entry(entry: EntityEntry, parsed: ParsedEntityFile) -> None:
     if entry.status and entry.status not in _SESSION_STATUS:
         parsed.warnings.append(f"{entry.title}: status '{entry.status}' is not planned, active or played.")
         entry.status = ''
+    if entry.subtype and entry.subtype not in SUBTYPES:
+        parsed.warnings.append(f"{entry.title}: subtype '{entry.subtype}' is not one of {', '.join(SUBTYPES)}; "
+                               f"it was left out.")
+        entry.subtype = ''
+    if entry.faction_state in ('unknown', 'undecided'):         # as the HTML import: a tag, no faction
+        tag = f'faction: {entry.faction_state}'
+        if tag not in entry.tags:
+            entry.tags.append(tag)
     if entry.source_id and any(e.source_id == entry.source_id for e in parsed.entries):
         parsed.warnings.append(f"{entry.title}: the id '{entry.source_id}' is used twice; the second entry was skipped.")
         return
@@ -248,9 +288,13 @@ def from_module_file(path: Path) -> ParsedEntityFile:
         if entity.entity_type not in names:
             continue
         faction = by_id.get(entity.faction_ref).title if entity.faction_ref in by_id else ''
-        parsed.entries.append(EntityEntry(kind=entity.entity_type, title=entity.title, source_id=entity.source_id,
-                                          body=entity.content, faction=faction, tags=list(entity.tags),
-                                          image=entity.image))
+        place = by_id.get(entity.located_in)
+        entry = EntityEntry(kind=entity.entity_type, title=entity.title, source_id=entity.source_id,
+                            body=entity.content, faction=faction, tags=list(entity.tags), image=entity.image,
+                            faction_state='' if faction else entity.faction_state,
+                            located_in=place.title if place is not None and place.entity_type == 'location' else '',
+                            subtype=entity.subtype if entity.subtype in SUBTYPES else '')
+        _check_entry(entry, parsed)
     if not parsed.entries:
         parsed.warnings.append("No entries were found in this file.")
     return parsed
@@ -451,6 +495,8 @@ class EntityFileService:
                     meta['source_id'] = entry.source_id
                 if entry.tags:
                     meta['tags'] = entry.tags
+                if entry.subtype:
+                    meta['subtype'] = entry.subtype
                 if entry.kind == 'session':
                     meta.update({'session_date': entry.session_date or date.today().isoformat(),
                                  'status': entry.status or 'planned', 'participants': entry.participants,

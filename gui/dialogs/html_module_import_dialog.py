@@ -12,8 +12,9 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialo
 
 from config.entity_types import get_registry
 from gui.dialogs.html_module_guide import open_html_module_guide
-from services.html_module_import_service import (ACTION_CONFLICT, ACTION_CREATE, ACTION_UNCHANGED,
-                                                 ACTION_UPDATE, AUTO_FACTION_IDS, NEW_FACTION_PREFIX,
+from services.html_module_import_service import (ACTION_CONFLICT, ACTION_CREATE, ACTION_LINK, ACTION_OVERWRITE,
+                                                 ACTION_UNCHANGED, ACTION_UPDATE, AUTO_FACTION_IDS, MATCH_NEW,
+                                                 MATCH_OVERWRITE, MATCH_USE, NEW_FACTION_PREFIX,
                                                  HtmlModuleImportService, ImportOptions, ImportPlan, ImportResult)
 from services.html_module_parser import ParsedModule
 
@@ -22,7 +23,15 @@ _ACTION_TEXT = {
     ACTION_UPDATE: 'Update',
     ACTION_UNCHANGED: 'Unchanged',
     ACTION_CONFLICT: 'Edited here - overwrite?',
+    ACTION_LINK: 'Use existing',
+    ACTION_OVERWRITE: 'Overwrite existing',
 }
+# The drop-down of a card that matches an entry the campaign already has.
+_MATCH_OPTIONS = [(MATCH_USE, "Use existing"), (MATCH_OVERWRITE, "Overwrite existing"), (MATCH_NEW, "Create new")]
+_MATCH_TIP = ("An entry with this title exists in the campaign already.\n"
+              "Use existing: keep its text, add it to this module, and point the module's links and faction to it.\n"
+              "Overwrite existing: replace its text with the card's.\n"
+              "Create new: make a second entry for this module.")
 _KIND_ORDER = ['module', 'session', 'character', 'npc', 'faction', 'location', 'item', 'quest', 'event']
 _NEW_FACTION_CHOICE = '__new_faction__'      # data of the "New faction..." entry of the drop-downs
 
@@ -45,6 +54,7 @@ class HtmlModuleImportDialog(QDialog):
         self._selection: Dict[str, bool] = {}     # remembered choices when options rebuild the plan
         self._faction_choices: Dict[str, str] = {}  # NPC source id -> faction source id picked by the user
         self._custom_factions: List[Tuple[str, str]] = []   # factions typed in here: (source id, title)
+        self._match_choices: Dict[str, str] = {}    # card source id -> use / overwrite / new (an existing entry)
         self._plan: Optional[ImportPlan] = None
 
         self.setWindowTitle(f"Import module into campaign '{campaign_name}'")
@@ -130,7 +140,8 @@ class HtmlModuleImportDialog(QDialog):
                              faction_choices=dict(self._faction_choices),
                              auto_factions=self.auto_factions_check.isChecked(),
                              new_factions=list(self._custom_factions),
-                             gear_to_inventory=self.gear_check.isChecked())
+                             gear_to_inventory=self.gear_check.isChecked(),
+                             match_choices=dict(self._match_choices))
 
     def _remember_selection(self) -> None:
         if self._plan:
@@ -165,9 +176,27 @@ class HtmlModuleImportDialog(QDialog):
             row.setData(0, Qt.ItemDataRole.UserRole, plan_item.source_id)
             if plan_item.kind in ('npc', 'character'):
                 row.setToolTip(0, _tooltip(self.service.plain_summary(plan_item.content)))
+            if plan_item.match_id is not None:
+                row.setText(1, '')
+                row.setToolTip(2, self._note(plan_item))
+                self.tree.setItemWidget(row, 1, self._match_combo(plan_item))
         self.tree.blockSignals(False)
         self._fill_faction_table()
         self._update_summary()
+
+    def _match_combo(self, plan_item) -> QComboBox:
+        combo = QComboBox()
+        combo.setToolTip(_MATCH_TIP)
+        for choice, text in _MATCH_OPTIONS:
+            combo.addItem(text, choice)
+        combo.setCurrentIndex(max(0, combo.findData(plan_item.match_choice)))
+        combo.currentIndexChanged.connect(
+            lambda _index, sid=plan_item.source_id, box=combo: self._on_match_picked(sid, box))
+        return combo
+
+    def _on_match_picked(self, source_id: str, combo: QComboBox) -> None:
+        self._match_choices[source_id] = combo.currentData() or MATCH_USE
+        QTimer.singleShot(0, self._rebuild)         # not inside the combo's own signal: the tree is rebuilt
 
     def _faction_options(self):
         """(source id, title) pairs a prompt may choose from; '' means no faction."""
@@ -242,6 +271,9 @@ class HtmlModuleImportDialog(QDialog):
     @staticmethod
     def _note(plan_item) -> str:
         bits = []
+        if plan_item.match_id is not None:
+            bits.append(f"existing: {plan_item.match_title}" + (" (chosen earlier)" if plan_item.match_saved else ""))
+        bits.extend(plan_item.notes)
         if plan_item.reason:
             bits.append(plan_item.reason)
         if plan_item.subtype:
@@ -250,6 +282,8 @@ class HtmlModuleImportDialog(QDialog):
             bits.append(f"gear of {plan_item.parent_source_id}")
         if plan_item.faction_source_id:
             bits.append(f"faction: {plan_item.faction_source_id}")
+        if plan_item.located_in_source_id:
+            bits.append(f"in: {plan_item.located_in_source_id}")
         if plan_item.image_path is not None:
             bits.append("picture")
         return ', '.join(bits)
@@ -267,9 +301,12 @@ class HtmlModuleImportDialog(QDialog):
         plan = self._plan
         selected = [i for i in plan.items if i.selected]
         new = sum(1 for i in selected if i.action == ACTION_CREATE)
-        updated = sum(1 for i in selected if i.action != ACTION_CREATE)
+        linked = sum(1 for i in selected if i.action == ACTION_LINK)
+        updated = sum(1 for i in selected if i.action not in (ACTION_CREATE, ACTION_LINK))
         conflicts = sum(1 for i in plan.items if i.action == ACTION_CONFLICT and not i.selected)
         text = f"{new} new, {updated} to update."
+        if linked:
+            text += f" {linked} use an entry the campaign already has."
         pictures = sum(1 for i in plan.items if i.action == ACTION_UNCHANGED and i.pictures_changed)
         if pictures:
             text += f" {pictures} unchanged with new or changed pictures (only the pictures are updated)."
@@ -277,9 +314,13 @@ class HtmlModuleImportDialog(QDialog):
             text += f" {conflicts} edited here and left alone unless you tick them."
         if plan.unlinked:
             text += f" {len(plan.unlinked)} NPCs have no faction."
-        if self.parsed.warnings:
-            text += " Warnings: " + "; ".join(self.parsed.warnings[:3])
+        warnings = list(self.parsed.warnings) + list(plan.warnings)
+        if warnings:
+            text += " Warnings: " + "; ".join(warnings[:3])
+            if len(warnings) > 3:
+                text += f" (and {len(warnings) - 3} more; hover for all)"
         self.summary.setText(text)
+        self.summary.setToolTip('<br>'.join(html.escape(w) for w in warnings))
         self.import_button.setEnabled(bool(selected) or bool(pictures and plan.options.import_images))
 
     # ------------------------------------------------------------ import

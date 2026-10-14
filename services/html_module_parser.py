@@ -337,6 +337,7 @@ class ParsedEntity:
     faction_state: str = ""     # what the module says when it names no faction: 'none', 'unknown' or 'undecided'
     count: int = 0              # data-count: one entry standing for several identical extras (0/1 = a single person)
     faction_line: bool = False  # the card carries a .npc-faction line or a data-faction attribute (the generation rule)
+    located_in: str = ""        # location cards: source id of the location this one is inside (data-located-in)
 
 
 @dataclass
@@ -590,6 +591,7 @@ def _card_entity(node: Node, ptype: str, subtype: str) -> ParsedEntity:
         faction_state=state if ptype == 'npc' else '', count=count,
         faction_line=faction_line is not None or bool(node.attrs.get('data-faction')),
         image_prompt=prompt, image=image, extra_images=extras, extra_image_captions=captions,
+        located_in=(node.attrs.get('data-located-in') or '').strip().lstrip('#') if ptype == 'location' else '',
         gear=_gear_items(node) if ptype in ('npc', 'character') else [],
         refs=[r for r in _xref_ids(node) if r != node.id])
 
@@ -792,7 +794,7 @@ def module_from_json(data: dict, source_path: str = "") -> ParsedModule:
             extra_images=list(e.get('extraImages', [])),
             extra_image_captions=dict(e.get('extraImageCaptions', {})),
             faction_state=e.get('factionState') or ('none' if e.get('noFaction') else ''),
-            count=int(e.get('count', 0) or 0),
+            count=int(e.get('count', 0) or 0), located_in=e.get('locatedIn', '') or '',
             gear=[ParsedGear(title=g['title'], content=g.get('content', '')) for g in e.get('gear', [])]))
     for s in data.get('sessions', []):
         module.sessions.append(ParsedSession(
@@ -818,7 +820,7 @@ def module_to_json(module: ParsedModule) -> dict:
                       'factionRef': e.faction_ref, 'factionHint': e.faction_hint,
                       'imagePrompt': e.image_prompt, 'image': e.image, 'refs': e.refs,
                       'extraImages': e.extra_images, 'extraImageCaptions': e.extra_image_captions,
-                      'factionState': e.faction_state, 'count': e.count,
+                      'factionState': e.faction_state, 'count': e.count, 'locatedIn': e.located_in,
                       'gear': [{'title': g.title, 'content': g.content} for g in e.gear]}
                      for e in module.entities],
     }

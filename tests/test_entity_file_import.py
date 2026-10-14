@@ -5,7 +5,7 @@ from pathlib import Path
 from models.database import DatabaseManager
 from services.entity_file_service import (ACTION_CONFLICT, ACTION_CREATE, ACTION_UNCHANGED, ACTION_UPDATE, ATTACH_CHOSEN,
                                           ATTACH_FILE, ATTACH_NEW, ATTACH_NONE, AttachOptions, EntityFileService,
-                                          parse_json, parse_markdown, read_entity_file, split_list)
+                                          parse_json, parse_markdown, read_entity_file, render_content, split_list)
 
 ROOT = Path(__file__).resolve().parent.parent
 MD_TEMPLATE = ROOT / "tools" / "entity_files" / "entities_template.md"
@@ -192,3 +192,76 @@ def test_pictures_are_read_from_the_files_folder_only(tmp_path):
     result = service.apply(service.build_plan(parsed, campaign), AttachOptions(ATTACH_NONE))
     assert FakeImages.saved == [("boss.png", "b.png")] and result.images == 1
     assert any("../outside.png" in e for e in result.errors)
+
+
+def test_faction_none_unknown_and_undecided_create_no_faction():
+    db, campaign = _db()
+    text = ("## NPC: Ann {#a}\nfaction: none\n\nx\n\n## NPC: Ben {#b}\nfaction: Unknown\ntags: Human\n\ny\n\n"
+            "## NPC: Cid {#c}\nfaction: undecided\n\nz\n")
+    parsed = parse_markdown(text, "p")
+    assert [e.faction for e in parsed.entries] == ['', '', '']
+    assert [e.tags for e in parsed.entries] == [[], ['Human', 'faction: unknown'], ['faction: undecided']]
+    service = EntityFileService(db)
+    assert service.apply(service.build_plan(parsed, campaign), AttachOptions(ATTACH_NONE)).errors == []
+    assert db.get_documents(campaign, "faction") == []
+    docs = {d['title']: json.loads(d['metadata']) for d in db.get_documents(campaign, "npc")}
+    assert 'faction_id' not in docs['Ann'] and docs['Cid']['tags'] == ['faction: undecided']
+    assert all('Faction:' not in d['content'] for d in db.get_documents(campaign, "npc"))
+    json_file = parse_json({"entities": [{"type": "npc", "title": "Dee", "faction": "unknown"}]})
+    assert json_file.entries[0].faction == '' and json_file.entries[0].tags == ['faction: unknown']
+
+
+def test_split_list_keeps_a_quoted_item_with_a_comma():
+    assert split_list('["Raton Pass, 1. rész"]') == ["Raton Pass, 1. rész"]
+    assert split_list('"Raton Pass, 1. rész", Docks') == ["Raton Pass, 1. rész", "Docks"]
+    assert split_list("['A, B', \"C\" , D]") == ["A, B", "C", "D"]
+    assert split_list("Kaz's Crew, Docks") == ["Kaz's Crew", "Docks"]
+    assert split_list('"unclosed, two') == ["unclosed", "two"]
+    assert split_list('a, , b,') == ["a", "b"] and split_list('') == []
+    parsed = parse_markdown('---\nmodules: ["Raton Pass, 1. rész", Docks]\n---\n## NPC: A\nx\n')
+    assert parsed.modules == ["Raton Pass, 1. rész", "Docks"]
+
+
+def test_front_matter_comments_need_whitespace_before_the_hash():
+    text = ("---\n# a comment line\n#another\nformat: dm-entities   # the format\npack: Pack #2\n"
+            "modules: [Raton Pass, Part #3]\t# note\n---\n## NPC: A\nx\n")
+    parsed = parse_markdown(text, "file")
+    assert parsed.pack == "pack-2" and parsed.warnings == []
+    assert parsed.modules == ["Raton Pass", "Part #3"]
+
+
+def test_subtype_is_stored_like_the_html_import_and_exported(tmp_path):
+    from services.entity_file_export import export_documents
+
+    db, campaign = _db()
+    text = ("## NPC: Thug {#g-thug}\nsubtype: Minor\n\nx\n\n## Item: Fireball {#pw-fire}\nsubtype: spell\n\ny\n\n"
+            "## Quest: Odd {#q-odd}\nsubtype: weird\n\nz\n")
+    parsed = parse_markdown(text, "p")
+    assert [e.subtype for e in parsed.entries] == ['minor', 'spell', '']
+    assert any("weird" in w for w in parsed.warnings)
+    assert "subtype" not in render_content(parsed.entries[0]).casefold()
+    service = EntityFileService(db)
+    service.apply(service.build_plan(parsed, campaign), AttachOptions(ATTACH_NONE))
+    docs = {d['title']: d for d in db.get_documents(campaign)}
+    assert json.loads(docs["Thug"]['metadata'])['subtype'] == 'minor'
+    assert 'subtype' not in json.loads(docs["Odd"]['metadata'])
+    md, js = tmp_path / "out.md", tmp_path / "out.json"
+    export_documents(db, [docs["Thug"], docs["Fireball"]], md)
+    export_documents(db, [docs["Thug"]], js)
+    assert "subtype: minor" in md.read_text(encoding="utf-8")
+    assert json.loads(js.read_text(encoding="utf-8"))["entities"][0]["subtype"] == "minor"
+    assert {e.subtype for e in read_entity_file(md).entries} == {'minor', 'spell'}
+    assert read_entity_file(js).entries[0].subtype == 'minor'
+
+
+def test_html_cards_carry_located_in_subtype_and_faction_state(tmp_path):
+    page = tmp_path / "cards.html"
+    page.write_text('<html><body><h1>Cards</h1>'
+                    '<details class="room" id="l-city"><summary><h4>Chicago</h4></summary><p>x</p></details>'
+                    '<details class="room" id="l-st" data-located-in="l-city"><summary><h4>Wacker</h4></summary><p>x</p></details>'
+                    '<details class="creature-card" id="m-wolf" data-faction="unknown"><summary>'
+                    '<div class="npc-name">Wolf</div></summary><div class="card-body"><p>Grr.</p></div></details>'
+                    '</body></html>', encoding="utf-8")
+    entries = {e.source_id: e for e in read_entity_file(page).entries}
+    assert entries['l-st'].located_in == "Chicago"
+    assert entries['m-wolf'].subtype == 'monster' and 'faction: unknown' in entries['m-wolf'].tags

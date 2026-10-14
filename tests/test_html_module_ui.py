@@ -264,3 +264,41 @@ def test_import_dialog_new_faction_is_selectable_for_other_npcs_and_npc_tooltips
         assert len(db.get_documents(campaign, 'faction')) == 2                       # Iron Guild + Dock Rats
     finally:
         dialog.deleteLater()
+
+
+def test_import_dialog_offers_existing_entries_with_a_choice(app, tmp_path):
+    from PyQt6.QtCore import Qt
+    from gui.dialogs.html_module_import_dialog import HtmlModuleImportDialog
+    from models.database import DatabaseManager
+    from services.html_module_import_service import ACTION_OVERWRITE, HtmlModuleImportService
+    from services.html_module_parser import parse_file
+
+    path = tmp_path / "Test_Pass_NED.html"
+    path.write_text(MODULE_HTML.replace('<div class="npc-name">Lone Wolf</div>', '<div class="npc-name">Big Boss</div>'),
+                    encoding="utf-8")
+    db = DatabaseManager(":memory:")
+    db.initialize_database()
+    campaign = db.create_module("Campaign", "d")
+    boss = db.create_document(campaign, "npc", "Big Boss", "My own notes.")
+    dialog = HtmlModuleImportDialog(HtmlModuleImportService(db), parse_file(path), campaign, "Campaign")
+    try:
+        def boss_row():
+            npcs = next(dialog.tree.topLevelItem(i) for i in range(dialog.tree.topLevelItemCount())
+                        if dialog.tree.topLevelItem(i).text(0) == 'NPCs')
+            return next(npcs.child(i) for i in range(npcs.childCount())
+                        if npcs.child(i).data(0, Qt.ItemDataRole.UserRole) == 'c-boss')
+
+        combo = dialog.tree.itemWidget(boss_row(), 1)
+        assert [combo.itemText(i) for i in range(combo.count())] == ["Use existing", "Overwrite existing", "Create new"]
+        assert combo.currentText() == "Use existing" and "existing: Big Boss" in boss_row().text(2)
+        assert "use an entry the campaign already has" in dialog.summary.text()
+        assert "c-loner" in dialog.summary.text()                   # the second "Big Boss" card is warned about
+        combo.setCurrentIndex(combo.findData('overwrite'))
+        app.processEvents()
+        assert next(i for i in dialog._plan.items if i.source_id == 'c-boss').action == ACTION_OVERWRITE
+        assert dialog.tree.itemWidget(boss_row(), 1).currentText() == "Overwrite existing"   # survives the rebuild
+        dialog._do_import()
+        assert dialog.import_result.errors == []
+        assert "My own notes." not in db.get_document(boss)['content']
+    finally:
+        dialog.deleteLater()

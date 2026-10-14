@@ -4,7 +4,9 @@
 
 Prints what the importer will find and lists problems a module author can fix:
 unknown cross-reference targets, NPCs without a faction, pictures that do not
-exist, entities without content. Exit code 1 when there are errors.
+exist, entities without content, quests without a Goal/Status line, a
+data-located-in that names no location card, and cards with the same title.
+Exit code 1 when there are errors.
 """
 
 import re
@@ -17,6 +19,9 @@ from services.html_module_parser import parse_file  # noqa: E402
 
 _IMAGE_DIRS = ('portraits', 'rooms', 'items', 'creatures')
 _IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
+# labelled lines a quest card should have (<b>Goal:</b> or <span class="lbl">Goal</span>; Hungarian labels too)
+_QUEST_LINES = (('Goal:', re.compile(r'\*\*\s*(?:goal|cél)\s*:', re.I)),
+                ('Status:', re.compile(r'\*\*\s*(?:status|állapot|státusz)\s*:', re.I)))
 
 
 def _is_entity_id(ref: str) -> bool:
@@ -32,6 +37,7 @@ def validate(path) -> tuple:
     errors, warnings = [], list(module.warnings)
 
     ids = {e.source_id for e in module.entities} | {s.source_id for s in module.sessions}
+    locations = {e.source_id for e in module.entities if e.entity_type == 'location'}
     for entity in module.entities:
         for ref in entity.refs:
             if _is_entity_id(ref) and ref not in ids:
@@ -54,6 +60,21 @@ def validate(path) -> tuple:
                 (folder / 'images' / d / f'{entity.source_id}{x}').is_file()
                 for d in _IMAGE_DIRS for x in _IMAGE_EXTS):
             warnings.append(f'{entity.source_id}: no picture (optional)')
+        if entity.source_id.startswith('q-'):
+            missing = [label for label, pattern in _QUEST_LINES if not pattern.search(entity.content)]
+            if missing:
+                warnings.append(f'{entity.source_id}: no {" / ".join(missing)} line '
+                                f'(add <p><b>Goal:</b> ...</p> and <p><b>Status:</b> open</p>)')
+        if entity.located_in and entity.located_in not in locations:
+            warnings.append(f'{entity.source_id}: data-located-in points to {entity.located_in}, '
+                            f'which is not a location card (l-...)')
+    titles = {}
+    for entity in module.entities:
+        titles.setdefault(entity.title.strip().casefold(), []).append(entity.source_id)
+    for same in titles.values():
+        if len(same) > 1:
+            warnings.append(f'{", ".join(same)}: the same title on {len(same)} cards '
+                            f'(only the first can use an existing entry of that name)')
     for scene in module.sessions:
         for ref in scene.refs:
             if _is_entity_id(ref) and ref not in ids:

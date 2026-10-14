@@ -9,7 +9,7 @@ from typing import Dict, List
 
 from config.entity_types import get_registry
 from config.paths import resolve_image_path
-from services.entity_file_service import FORMAT_NAME, EntityEntry, ParsedEntityFile, _slug
+from services.entity_file_service import FORMAT_NAME, SUBTYPES, EntityEntry, ParsedEntityFile, _slug
 from utils.natural_sort import natural_key
 
 _RPG_LINK = re.compile(r'\[([^\]]*)\]\(rpg://([a-z0-9_]+)/(\d+)\)')
@@ -63,6 +63,8 @@ def build_export(db, documents: List[dict], pack: str) -> ParsedEntityFile:
             entry.faction = faction['title']
         if doc['entity_type'] == 'location' and parents.get(doc['id']) in everything:
             entry.located_in = everything[parents[doc['id']]]['title']
+        if meta.get('subtype') in SUBTYPES:
+            entry.subtype = meta['subtype']
         entry.tags = [str(t) for t in meta.get('tags', []) if isinstance(t, (str, int))] if isinstance(meta.get('tags'), list) else []
         entry.modules = sorted((everything[m]['title'] for m in links.get(doc['id'], []) if m in everything), key=natural_key)
         if doc['entity_type'] == 'session':
@@ -79,6 +81,8 @@ def to_markdown(parsed: ParsedEntityFile) -> str:
     lines = ["---", f"format: {FORMAT_NAME}", f"pack: {parsed.pack}", "---", ""]
     for entry in parsed.entries:
         lines.append(f"## {registry.label(entry.kind)}: {entry.title} {{#{entry.source_id}}}")
+        if entry.subtype:
+            lines.append(f"subtype: {entry.subtype}")
         if entry.faction:
             lines.append(f"faction: {entry.faction}")
         if entry.located_in:
@@ -107,6 +111,8 @@ def to_json(parsed: ParsedEntityFile) -> dict:
     entities = []
     for entry in parsed.entries:
         item = {"type": registry.label(entry.kind), "id": entry.source_id, "title": entry.title}
+        if entry.subtype:
+            item["subtype"] = entry.subtype
         if entry.faction:
             item["faction"] = entry.faction
         if entry.located_in:

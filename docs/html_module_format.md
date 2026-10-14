@@ -69,6 +69,14 @@ Other conventions used:
   `images/{portraits,rooms,items,creatures}/<id>.jpg`; the `.imgprompt` that follows the main picture is its prompt;
 * every NPC card carries a faction line `<div class="npc-faction" data-faction="...">` (also allowed: `data-faction` on the card, a `span.npc-faction` in a table-row cell, or a `#f-...` link in the line). The value is a faction id or `none`, `unknown`, `undecided`: `unknown`/`undecided` link nothing and add the tag `faction: unknown`/`faction: undecided`; all four states are preselected in the preview faction table and can be changed there;
 * `data-count="N"` on a card (or row) marks one entry that stands for N identical extras; it gets the tag `×N`;
+* `data-located-in="l-id"` on a location card sets its "Located in" (a `located_in` relationship); JSON `locatedIn`;
+  an id that is not a location card of the module is a plan warning (`ImportPlan.warnings`);
+* a card that no entry of this module has yet is matched to an existing campaign entry of the same type and
+  title (casefold; npc, faction, location, item, quest, character; not scenes, sessions, gear, or `g-` cards with
+  `data-count`). Choices `use` (default: text kept, `belongs_to_module` added, links and factions point to it),
+  `overwrite` and `new`; saved on the module document as `metadata.linked_entries` (source id -> document id),
+  which a re-import reads before matching titles. A used entry's import keys (`module_doc_id`, `source_id`,
+  hashes) are never changed; its faction, "Located in" and picture are only filled in when it has none;
 * each `li` of a `.gear` list on a `c-` card becomes an inventory item of that NPC (`inventory_item` document,
   metadata `parent_document_id`, source id `<npc id>#gear-N`); re-imports update the text but keep the type, quantity
   and equipped flag the user set;

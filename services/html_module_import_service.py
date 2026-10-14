@@ -12,6 +12,12 @@ the HTML, e.g. ``c-maria``). Re-importing matches on those, so existing document
 are updated instead of duplicated. Documents edited in the DM tool since the last
 import are reported as conflicts and only overwritten when explicitly selected.
 
+A card that no entry of this module has yet may match an entry the campaign already has (same type
+and title, letter case ignored; npc, faction, location, item, quest and character). The preview then
+offers: use the existing entry (default; its text is kept, it joins this module and the module's links
+and faction point to it), overwrite its text, or create a new entry. The choice is saved on the module
+document (``metadata.linked_entries``: source id -> document id), so a re-import finds the entry again.
+
 Links live in ``document_relationships``:
 
 ====================== =====================================================
@@ -44,6 +50,8 @@ ACTION_CREATE = 'create'
 ACTION_UPDATE = 'update'
 ACTION_UNCHANGED = 'unchanged'
 ACTION_CONFLICT = 'conflict'
+ACTION_LINK = 'link'                # a card that uses an entry the campaign already has, keeping its text
+ACTION_OVERWRITE = 'overwrite'      # a card that replaces the text of an entry the campaign already has
 _PICTURE_SAME, _PICTURE_NEW, _PICTURE_CHANGED = 'same', 'new', 'changed'
 
 _IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
@@ -60,6 +68,12 @@ FACTION_STATE_IDS = {'__unknown__': 'unknown', '__undecided__': 'undecided'}
 _STATE_TO_CHOICE = {'none': '', 'unknown': '__unknown__', 'undecided': '__undecided__'}
 _NEW_FACTION_TEXT = 'Created in the module import preview. Rename or delete it freely.'
 _TOOLTIP_CHARS = 700
+
+# A card that no entry of this module has yet may use an entry of the campaign with the same type and title.
+MATCH_TYPES = ('npc', 'faction', 'location', 'item', 'quest', 'character')
+MATCH_USE, MATCH_OVERWRITE, MATCH_NEW = 'use', 'overwrite', 'new'
+MATCH_CHOICES = (MATCH_USE, MATCH_OVERWRITE, MATCH_NEW)
+LINKED_ENTRIES_KEY = 'linked_entries'      # module document metadata: card source id -> id of the existing entry
 _AUTO_FACTION_TITLES = {
     'hu': {AUTO_FACTION_MONSTERS: 'Szörnyek', AUTO_FACTION_UNAFFILIATED: 'Függetlenek'},
     'en': {AUTO_FACTION_MONSTERS: 'Monsters', AUTO_FACTION_UNAFFILIATED: 'Unaffiliated'},
@@ -88,6 +102,9 @@ class ImportOptions:
     # a faction document is created only when at least one NPC uses it.
     new_factions: List[Tuple[str, str]] = field(default_factory=list)
     gear_to_inventory: bool = True      # one inventory item per line of an NPC's gear list
+    # Card source id -> MATCH_USE / MATCH_OVERWRITE / MATCH_NEW, for cards that match an existing entry
+    # of the campaign (MATCH_USE when missing).
+    match_choices: Dict[str, str] = field(default_factory=dict)
 
 
 SCENES_HEADING = 'Scenes'
@@ -117,6 +134,17 @@ class PlanItem:
     extra_images: List[Tuple[Path, str]] = field(default_factory=list)   # (file, caption), never primary
     parent_source_id: str = ""      # inventory items: source id of the NPC that carries them
     pictures_changed: bool = False  # a picture of the card is new or differs from the one stored earlier
+    located_in_source_id: str = ""  # locations: source id of the location card this one is inside
+    match_id: Optional[int] = None  # an existing entry of the campaign with the same type and title
+    match_title: str = ""
+    match_choice: str = ""          # MATCH_USE / MATCH_OVERWRITE / MATCH_NEW when match_id is set
+    match_saved: bool = False       # the match was chosen at an earlier import (saved on the module document)
+    notes: List[str] = field(default_factory=list)   # shown in the preview, e.g. a faction that differs
+
+    @property
+    def uses_existing(self) -> bool:
+        """The card is written into (or only linked to) an entry the campaign already had."""
+        return self.match_id is not None and self.match_choice in (MATCH_USE, MATCH_OVERWRITE)
 
 
 @dataclass
@@ -138,6 +166,7 @@ class ImportPlan:
     unlinked: List[str] = field(default_factory=list)   # NPCs that end up without a faction
     faction_prompts: List[FactionPrompt] = field(default_factory=list)
     factions: List[Tuple[str, str]] = field(default_factory=list)   # (source id, title) a prompt may choose
+    warnings: List[str] = field(default_factory=list)   # found while planning (the parser's are in module.warnings)
 
     def counts(self) -> Dict[str, Dict[str, int]]:
         out: Dict[str, Dict[str, int]] = {}
@@ -207,6 +236,19 @@ class HtmlModuleImportService:
         auto_used: List[str] = []              # automatic and user-typed factions that somebody uses
         gear_items: List[PlanItem] = []
 
+        matches, saved_matches = self._match_existing(parsed, docs, existing, module_id, self._meta(module_doc), plan)
+
+        def planned_id(source_id: str) -> Optional[int]:
+            """The document a card will end up as, when that document exists already."""
+            if source_id in matches and options.match_choices.get(source_id, MATCH_USE) != MATCH_NEW:
+                return matches[source_id]['id']
+            doc = existing.get(source_id)
+            return doc['id'] if doc is not None else None
+
+        locations = {e.source_id for e in parsed.entities if e.entity_type == 'location'}
+        parents = self.db.get_parent_links(campaign_id) if any(e.located_in for e in parsed.entities) else {}
+        faction_titles = dict(plan.factions)
+
         for entity in parsed.entities:
             content = link_audio(entity.content)
             if options.import_prompts and entity.image_prompt:
@@ -215,14 +257,28 @@ class HtmlModuleImportService:
             item = self._plan_item(
                 entity.entity_type, entity.source_id, entity.title, content, existing_doc,
                 entity.subtype, list(entity.refs), list(entity.tags))
+            if entity.source_id in matches:
+                self._use_match(item, matches[entity.source_id], entity.source_id in saved_matches, options)
+            match_doc = matches[entity.source_id] if item.uses_existing else None
             if entity.entity_type == 'npc':
-                self._assign_faction(plan, item, entity, factions, parsed, existing_doc, auto_used)
-                self._mark_faction_change(item, existing_doc, existing)
+                self._assign_faction(plan, item, entity, factions, parsed, existing_doc or match_doc, auto_used)
+                self._mark_faction_change(item, existing_doc, planned_id)
+                if match_doc is not None:
+                    self._keep_existing_faction(item, match_doc, docs, planned_id, faction_titles)
+            if entity.entity_type == 'location' and entity.located_in:
+                if entity.located_in in locations and entity.located_in != entity.source_id:
+                    item.located_in_source_id = entity.located_in
+                    self._mark_location_change(item, existing_doc, parents, planned_id)
+                else:
+                    plan.warnings.append(f"{entity.title}: data-located-in points to '{entity.located_in}', "
+                                         f"which is not a location card of this module; it is located nowhere.")
             if options.import_images and html_dir is not None:
                 item.image_path = self._find_image(html_dir, entity)
                 item.extra_images = self._find_extra_images(html_dir, entity, item.image_path)
                 self._mark_picture_change(item, existing_doc)
             plan.items.append(item)
+            if item.match_choice == MATCH_USE:     # an existing entry keeps what it carries
+                continue
             if options.gear_to_inventory and entity.entity_type in ('npc', 'character'):
                 for number, gear in enumerate(entity.gear, start=1):
                     source_id = f'{entity.source_id}#gear-{number}'
@@ -302,17 +358,100 @@ class HtmlModuleImportService:
         if not item.faction_source_id:
             plan.unlinked.append(entity.title)
 
-    def _mark_faction_change(self, item: PlanItem, existing_doc: Optional[dict], existing: Dict[str, dict]) -> None:
+    def _mark_faction_change(self, item: PlanItem, existing_doc: Optional[dict],
+                             planned_id: Callable[[str], Optional[int]]) -> None:
         """A new faction choice must reach an NPC whose text did not change (it would be skipped as unchanged)."""
         if existing_doc is None or item.action != ACTION_UNCHANGED:
             return
         meta = self._meta(existing_doc)
-        wanted = existing.get(item.faction_source_id) if item.faction_source_id else None
-        changed = bool(item.faction_source_id) and (wanted is None or meta.get('faction_id') != wanted['id'])
+        wanted = planned_id(item.faction_source_id) if item.faction_source_id else None
+        changed = bool(item.faction_source_id) and (wanted is None or meta.get('faction_id') != wanted)
         have = {t for t in meta.get('tags', []) if str(t).startswith('faction: ')}
         want = {t for t in item.tags if str(t).startswith('faction: ')}
         if changed or have != want:
             item.action, item.selected, item.reason = ACTION_UPDATE, True, 'Faction changed'
+
+    @staticmethod
+    def _matchable(entity: ParsedEntity) -> bool:
+        """Cards that may use an existing entry: not scenes, sessions or gear, and not a group of extras."""
+        return entity.entity_type in MATCH_TYPES and not (entity.source_id.startswith('g-') and entity.count)
+
+    def _match_existing(self, parsed: ParsedModule, docs: List[dict], existing: Dict[str, dict],
+                        module_id: Optional[int], module_meta: dict, plan: ImportPlan):
+        """Entries of the campaign that cards of this module may use: ({card source id: document}, {saved ids}).
+
+        Only cards that no entry of this module has yet are matched. A choice saved at an earlier import
+        (source id -> document id on the module document) comes first, whatever the titles are now; then an
+        entry of the same type and title (letter case ignored). One entry serves one card."""
+        saved = module_meta.get(LINKED_ENTRIES_KEY)
+        saved = saved if isinstance(saved, dict) else {}
+        own = {doc['id'] for doc in existing.values()}
+        by_id = {doc['id']: doc for doc in docs}
+        by_title: Dict[Tuple[str, str], dict] = {}
+        for doc in sorted(docs, key=lambda d: d['id']):
+            if doc['entity_type'] in MATCH_TYPES and doc['id'] not in own:
+                by_title.setdefault((doc['entity_type'], (doc['title'] or '').strip().casefold()), doc)
+        cards = [e for e in parsed.entities if self._matchable(e)
+                 and self._existing_doc(existing, e.source_id, e.entity_type) is None]
+        matches: Dict[str, dict] = {}
+        saved_ids = set()
+        claimed: Dict[int, ParsedEntity] = {}
+        for entity in cards:
+            doc = by_id.get(saved.get(entity.source_id))
+            if (doc is not None and doc['entity_type'] == entity.entity_type and doc['id'] not in own
+                    and doc['id'] not in claimed):
+                matches[entity.source_id] = doc
+                saved_ids.add(entity.source_id)
+                claimed[doc['id']] = entity
+        for entity in cards:
+            if entity.source_id in matches:
+                continue
+            doc = by_title.get((entity.entity_type, entity.title.strip().casefold()))
+            if doc is None:
+                continue
+            if doc['id'] in claimed:
+                first = claimed[doc['id']]
+                plan.warnings.append(
+                    f"{entity.title} ({entity.source_id}): the card {first.source_id} has the same title and uses "
+                    f"the existing entry; this card becomes a new entry.")
+                continue
+            matches[entity.source_id] = doc
+            claimed[doc['id']] = entity
+        return matches, saved_ids
+
+    @staticmethod
+    def _use_match(item: PlanItem, doc: dict, saved: bool, options: ImportOptions) -> None:
+        choice = options.match_choices.get(item.source_id, MATCH_USE)
+        if choice not in MATCH_CHOICES:
+            choice = MATCH_USE
+        item.match_id, item.match_title, item.match_choice, item.match_saved = doc['id'], doc['title'], choice, saved
+        if choice == MATCH_NEW:
+            return
+        item.existing_id = doc['id']
+        item.action = ACTION_LINK if choice == MATCH_USE else ACTION_OVERWRITE
+        item.selected, item.reason = True, ''
+
+    def _keep_existing_faction(self, item: PlanItem, match_doc: dict, docs: List[dict],
+                               planned_id: Callable[[str], Optional[int]], faction_titles: Dict[str, str]) -> None:
+        """An existing entry that has a faction keeps it; a different one in the module is only a note."""
+        have = self._meta(match_doc).get('faction_id')
+        if have is None or not item.faction_source_id:
+            return
+        if planned_id(item.faction_source_id) != have:
+            kept = next((d['title'] for d in docs if d['id'] == have), f'#{have}')
+            wanted = faction_titles.get(item.faction_source_id, item.faction_source_id)
+            item.notes.append(f"Faction differs: keeps '{kept}', the module says '{wanted}'")
+        item.faction_source_id = ''
+
+    @staticmethod
+    def _mark_location_change(item: PlanItem, existing_doc: Optional[dict], parents: Dict[int, int],
+                              planned_id: Callable[[str], Optional[int]]) -> None:
+        """A new 'Located in' must reach a location whose text did not change."""
+        if existing_doc is None or item.action != ACTION_UNCHANGED:
+            return
+        wanted = planned_id(item.located_in_source_id)
+        if wanted is None or parents.get(existing_doc['id']) != wanted:
+            item.action, item.selected, item.reason = ACTION_UPDATE, True, 'Located in changed'
 
     def _mark_picture_change(self, item: PlanItem, existing_doc: Optional[dict]) -> None:
         """Flag a re-imported card whose pictures are new or different from the stored ones."""
@@ -504,10 +643,28 @@ class HtmlModuleImportService:
 
         # pass 1: create / update documents with their raw content
         created: List[PlanItem] = []
+        linked: List[PlanItem] = []         # existing entries of the campaign used as they are
         for item in todo:
             step += 1
             if progress:
                 progress(step, total, item.title)
+            if item.uses_existing:
+                try:
+                    current = self.db.get_document(item.existing_id)
+                    if current is None:
+                        result.errors.append(f'{item.title}: the existing entry no longer exists')
+                        continue
+                    if item.action == ACTION_OVERWRITE:
+                        self.db.update_document(item.existing_id, item.title, item.content,
+                                                json.dumps(self._overwrite_meta(current, item)))
+                        result.updated += 1
+                        created.append(item)
+                    else:
+                        linked.append(item)
+                    id_map[item.source_id] = (item.existing_id, item.kind)
+                except Exception as e:
+                    result.errors.append(f'{item.title}: {e}')
+                continue
             meta = {'module_doc_id': module_id, 'source_id': item.source_id,
                     'imported_raw_hash': item.raw_hash}
             if item.subtype:
@@ -541,6 +698,7 @@ class HtmlModuleImportService:
                 created.append(item)
             except Exception as e:
                 result.errors.append(f'{item.title}: {e}')
+        self._save_linked_entries(plan, module_id, id_map, result)
 
         # pass 2: faction ids, final links in the text, hashes of what was written
         step += 1
@@ -555,10 +713,24 @@ class HtmlModuleImportService:
                 if faction:
                     meta['faction_id'] = faction[0]
                 final = self._rewrite_links(item.content, id_map, module_id)
-                meta['imported_final_hash'] = _hash(final)
+                if not item.uses_existing:      # the import hashes of an existing entry belong to whoever made it
+                    meta['imported_final_hash'] = _hash(final)
                 self.db.update_document(doc_id, item.title, final, json.dumps(meta), record_history=False)
             except Exception as e:
                 result.errors.append(f'{item.title} (links): {e}')
+        for item in linked:                     # text kept; only a missing faction is filled in
+            faction = id_map.get(item.faction_source_id)
+            if not faction:
+                continue
+            try:
+                current = self.db.get_document(item.existing_id)
+                meta = self._meta(current)
+                if meta.get('faction_id') is None:
+                    meta['faction_id'] = faction[0]
+                    self.db.update_document(item.existing_id, current['title'], current.get('content') or '',
+                                            json.dumps(meta), record_history=False)
+            except Exception as e:
+                result.errors.append(f'{item.title} (faction): {e}')
 
         if module_item.selected:
             try:
@@ -569,15 +741,18 @@ class HtmlModuleImportService:
             except Exception as e:
                 result.errors.append(f'Module document (links): {e}')
 
-        result.links = self._create_relationships(plan, created, id_map, module_id, result)
+        result.links = self._create_relationships(plan, created + linked, id_map, module_id, result)
+        self._set_locations(plan, created + linked, id_map, result)
         self._copy_scenes_to_existing_session(plan, id_map, module_id, result)
 
         if plan.options.import_images:
             # a card whose text did not change still gets its new or changed pictures
             refresh = [i for i in plan.items if i.action == ACTION_UNCHANGED and i.pictures_changed
                        and i.source_id in id_map]
-            for item in created + refresh:
+            for item in created + linked + refresh:
                 doc_id = id_map[item.source_id][0]
+                if item.uses_existing and self.db.get_document_images(doc_id):
+                    continue                    # an existing entry gets a picture only when it has none
                 if item.image_path is not None and self._attach_image(
                         campaign_id, doc_id, item.image_path, item.source_id):
                     result.images += 1
@@ -590,6 +765,61 @@ class HtmlModuleImportService:
         if progress:
             progress(total, total, 'Done')
         return result
+
+    def _overwrite_meta(self, current: dict, item: PlanItem) -> dict:
+        """Metadata of an existing entry whose text a card replaces: its own, plus the card's tags and subtype.
+        Its import keys (module, source id, hashes) stay as they are, they belong to whoever made it."""
+        meta = self._meta(current)
+        tags = meta.get('tags') if isinstance(meta.get('tags'), list) else []
+        merged = list(dict.fromkeys(list(tags) + list(item.tags)))
+        if merged:
+            meta['tags'] = merged
+        if item.subtype and not meta.get('subtype'):
+            meta['subtype'] = item.subtype
+        return meta
+
+    def _save_linked_entries(self, plan: ImportPlan, module_id: int, id_map: Dict[str, Tuple[int, str]],
+                             result: ImportResult) -> None:
+        """Remember on the module document which existing entry each card uses, for the next import."""
+        try:
+            module_doc = self.db.get_document(module_id)
+            meta = self._meta(module_doc)
+            saved = meta.get(LINKED_ENTRIES_KEY) if isinstance(meta.get(LINKED_ENTRIES_KEY), dict) else {}
+            links = dict(saved)
+            for item in plan.items:
+                if item.match_id is None or not item.selected or item.source_id not in id_map:
+                    continue
+                if item.uses_existing:
+                    links[item.source_id] = item.match_id
+                else:                                   # a new entry of its own was made instead
+                    links.pop(item.source_id, None)
+            if links != saved:
+                meta[LINKED_ENTRIES_KEY] = links
+                self.db.update_document(module_id, module_doc['title'], module_doc.get('content') or '',
+                                        json.dumps(meta), record_history=False)
+        except Exception as e:
+            result.errors.append(f'Module document (existing entries): {e}')
+
+    def _set_locations(self, plan: ImportPlan, items: List[PlanItem], id_map: Dict[str, Tuple[int, str]],
+                       result: ImportResult) -> None:
+        """'Located in' from data-located-in. An existing entry of the campaign keeps a place it is in already."""
+        wanted = [i for i in items if i.kind == 'location' and i.located_in_source_id]
+        if not wanted:
+            return
+        parents = self.db.get_parent_links(plan.campaign_id)
+        for item in wanted:
+            target = id_map.get(item.located_in_source_id)
+            if target is None:                         # the place it is in was not imported
+                continue
+            doc_id = id_map[item.source_id][0]
+            if parents.get(doc_id) == target[0] or (item.uses_existing and doc_id in parents):
+                continue
+            try:
+                if not self.db.set_parent_link(doc_id, target[0]):
+                    result.errors.append(f'{item.title}: it cannot be located inside {item.located_in_source_id} '
+                                         f'(that place is inside it).')
+            except Exception as e:
+                result.errors.append(f'{item.title} (located in): {e}')
 
     def _copy_scenes_to_existing_session(self, plan: ImportPlan, id_map: Dict[str, Tuple[int, str]],
                                          module_id: int, result: ImportResult) -> None:
@@ -676,6 +906,8 @@ class HtmlModuleImportService:
                 continue
             if item.faction_source_id and item.faction_source_id in id_map:
                 link(doc_id, id_map[item.faction_source_id][0], REL_FACTION)
+            if item.action == ACTION_LINK:             # its own text was kept, so it references nothing new
+                continue
             for ref in item.refs:
                 target = id_map.get(ref)
                 if target and target[1] != 'session' and target[0] not in scene_doc_ids:

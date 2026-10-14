@@ -27,7 +27,7 @@ Every entry needs a **unique id** that starts with one of these prefixes. Ids ar
 | `g-` | NPC (minor) | table `tr` (first cell = name; a `Courier` cell or a column headed "prompt" = image prompt) |
 | `m-` | NPC (monster) | `details.creature-card` |
 | `f-` | Faction | `div.card` with an `h4` title |
-| `l-` | Location | `details.room` with an `h4` title |
+| `l-` | Location | `details.room` with an `h4` title; optionally `data-located-in="l-..."` (the place it is inside) |
 | `item-`, `gift-`, `pw-` | Item (normal, gift, spell) | `details.card` or `div.card` with an `h4` |
 | `h-` | Item (handout) | `details.room` |
 | `hook-` | Character (hook) | `div.hook-box`, optionally `data-character="Name"` (one per player character) |
@@ -88,6 +88,15 @@ A faction, a location and an item:
 <details class="card" id="item-key">
   <summary class="card-summary"><h4>Rusty Key</h4></summary>
   <div class="card-body"><p>Opens the cellar.</p></div>
+</details>
+```
+
+**Places inside places:** `data-located-in="l-yard"` on a location card sets its **Located in** to that location (a cellar in the yard, a street in a district). The target must be another location card of the same module; an unknown one is a warning in the preview and the place is located nowhere.
+
+```html
+<details class="room" id="l-cellar" data-located-in="l-yard">
+  <summary class="card-summary"><h4>The Cellar</h4></summary>
+  <div class="card-body"><p>Damp and dark.</p></div>
 </details>
 ```
 
@@ -181,14 +190,26 @@ The import preview shows a summary line and warnings. Fix the HTML, save it and 
 | N NPCs have no faction | These NPCs are listed in the faction table of the preview. Choose a faction there, or add the `.npc-faction` line to the card. |
 | N edited here and left alone unless you tick them | You changed these entries in the app since the last import. Tick them in the preview only if the file should overwrite your changes. |
 | N unchanged with new or changed pictures | The text did not change but the pictures did. Only the pictures are updated. |
+| `X`: data-located-in points to `l-...`, which is not a location card of this module | The place named in `data-located-in` does not exist (or is not an `l-` card). Fix the id; until then the place is located nowhere. |
+| `X (c-x)`: the card `c-y` has the same title and uses the existing entry | Two cards have the same title and the campaign has an entry with that title. Only the first card can use it; the second becomes a new entry. Give the cards different titles if they are different people or things. |
+| N use an entry the campaign already has | These cards have the same type and title as entries that exist already (section 10). Check the choice in the Action column. |
+| Faction differs: keeps 'A', the module says 'B' (in the Note column) | The existing entry is in another faction than the module says. Nothing is changed; set the faction in the app if the module is right. |
 
 The preview does **not** warn about a missing picture: a card whose picture file cannot be found simply gets no picture. If a picture does not show up, check the path in `src` and the `images/` folder. The command-line check at the end of this guide lists missing pictures and unknown links.
 
-Entries in the preview are marked **New**, **Update**, **Unchanged** or **Edited here - overwrite?**.
+Entries in the preview are marked **New**, **Update**, **Unchanged** or **Edited here - overwrite?**. A card that matches an entry the campaign already has shows a choice instead (section 10).
 
 ## 10. Importing again
 
 You can import the same file again after you change it. The app matches entries by their id: unchanged entries are skipped, changed ones are updated, and entries you edited in the app are only overwritten when you tick them in the preview. Gear you changed (item type, quantity, equipped) is kept. A faction you chose by hand is kept. This is why ids must never change.
+
+**Entries the campaign already has.** When no entry of this module has a card's id yet, the import looks for an entry of the campaign with the **same type and title** (letter case does not matter), for NPCs, factions, locations, items, quests and characters. Scenes, sessions, gear and `g-` cards with `data-count` are never matched. Such a card offers three choices in the Action column:
+
+- **Use existing** (the default): the entry keeps its text. It is added to this module, and the module's links and faction point to it. A module faction with the same name as an existing faction becomes that faction. A picture, a faction and a "Located in" are added only when the entry has none (a different faction is a note in the preview, nothing is changed), and the card's gear is not added.
+- **Overwrite existing**: the entry gets the card's text (its tags are added to the entry's, and the same rules for picture and faction apply).
+- **Create new**: a separate entry for this module, as if no entry had the title.
+
+The choice is saved with the module, so the next import finds the same entry without asking, even if one of the titles has changed since. If two cards of the module have the same title, only the first can use the existing entry; the second becomes a new entry and the preview warns about it.
 
 ## 11. Alternative: a JSON data block
 
@@ -201,8 +222,10 @@ Instead of relying on the markup, a generator can write the data itself, either 
   "entities": [ { "id": "c-boss", "type": "npc", "subtype": "", "title": "", "content": "markdown",
                   "tags": [], "factionRef": "f-guild", "factionHint": "", "imagePrompt": "",
                   "image": "images/portraits/c-boss.jpg", "extraImages": [], "extraImageCaptions": {},
-                  "noFaction": false, "gear": [ { "title": "Rusty key", "content": "markdown" } ], "refs": [] } ] }
+                  "noFaction": false, "locatedIn": "", "gear": [ { "title": "Rusty key", "content": "markdown" } ], "refs": [] } ] }
 ```
+
+`locatedIn` (locations only) is the id of the location card it is inside, like `data-located-in`.
 
 `type` is `npc`, `faction`, `location`, `item`, `character` or `event`.
 
@@ -225,6 +248,8 @@ Instead of relying on the markup, a generator can write the data itself, either 
 - [ ] Gear is a `.gear` list with one `<li>` per item, the item name in `<b>`
 - [ ] Every picture exists under `images/` and is referenced with a relative path; the main picture has `data-gen-id` equal to the card id
 - [ ] Every quest and goal of the story is its own `q-` / `goal-` card with the goal, who gives it, the reward and the status
+- [ ] Every `data-located-in` names another location card (`l-...`)
+- [ ] No two cards share a title, unless they really are different entries of the same name
 - [ ] Scenes are `div.scene` with `.scene-no` and `h4`
 - [ ] The import preview shows no warnings you did not expect
 
@@ -237,5 +262,7 @@ python -m services.html_module_parser "Module.html"            # counts and warn
 python -m services.html_module_parser "Module.html" --export   # also writes module-export.json
 python tools/html_module/validate_module.py "Module.html"      # unknown links, missing pictures, NPCs without a faction
 ```
+
+The validator also warns about a `q-` card without a `Goal:` or `Status:` line, a `data-located-in` that points to no location card, and two cards with the same title.
 
 The importer reference for developers is `docs/html_module_format.md`.
